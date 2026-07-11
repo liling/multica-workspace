@@ -26,6 +26,8 @@
 #   - hermes   : 官方脚本 https://hermes-agent.nousresearch.com/install.sh
 #                -> root 下命令落在 /usr/local/bin/hermes，
 #                   代码在 /usr/local/lib/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
+#                   构建时加 --skip-setup --skip-browser（issue MEM-16），
+#                   跳过 setup 向导与 Playwright/Chromium 下载以省流量。
 #   - multica  : 官方脚本 https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh
 #                -> root 下命令落在 /usr/local/bin/multica（已位于默认 PATH）
 #   - gstack   : scripts/gstack-install.sh（本仓库随附），克隆 gstack 仓库并 build
@@ -100,9 +102,14 @@ RUN apt-get update \
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-# 安装 hermes（--skip-setup 跳过交互式初始化向导；
-# 它会自行用 uv 拉取 Python 3.11 / Node 22 并安装依赖）
-RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup
+# 安装 hermes（issue MEM-16）：
+#   --skip-setup   跳过交互式初始化向导（容器内无 tty，原本也会被安装器自动跳过；
+#                   这里显式带上更清晰，也防止未来安装器探测逻辑变化）
+#   --skip-browser 跳过 Playwright/Chromium 下载（节省构建期网络流量与磁盘空间；
+#                   代价是镜像里 hermes 的 browser tools 不可用，如需可在运行期手动：
+#                   cd $INSTALL_DIR && npx playwright install chromium）
+# 安装器自行用 uv 拉取 Python 3.11 / Node 22 并安装依赖。
+RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser
 
 # 安装 multica CLI（官方脚本，默认仅安装 CLI，不附带 self-host server；
 # 二进制落在 /usr/local/bin/multica，已位于默认 PATH）
