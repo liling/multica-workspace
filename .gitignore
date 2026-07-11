@@ -1,0 +1,4 @@
+# Multica platform runtime / context files — not part of this project
+.agent_context/
+.multica/
+AGENTS.md
