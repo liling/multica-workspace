@@ -29,11 +29,12 @@
 #   - multica 安装器默认将二进制放入 /usr/local/bin（root 可写，已位于默认 PATH），
 #     故无需额外修改 PATH。
 #   - 镜像以 root 用户运行（与各安装器的默认布局一致）。
-#   - 容器通过 shell 形式的 CMD 在运行时把 HOSTNAME 设为 daemon 设备名
-#     （MULTICA_DAEMON_DEVICE_NAME），再以 `exec` 前台拉起
-#     `multica daemon start --foreground`：daemon 成为 PID 1 以正确接收信号，
-#     设备名取自容器自身的 HOSTNAME，便于 Multica 平台识别该容器；
-#     opencode / hermes / gstack 环境同样在镜像中可用。
+#   - 认证说明（重要）：multica 的 daemon / CLI 只认 MULTICA_TOKEN 这个
+#     环境变量做认证；config.json 里的 token 字段、multica login 持久化的
+#     登录态，在“空卷”环境下都无法让 daemon 通过认证。只要容器进程持有
+#     MULTICA_TOKEN，首次启动即可直接认证，无需先 login。
+#     容器用 entrypoint.sh 在拉起 daemon 前校验 MULTICA_TOKEN，缺失则明确
+#     非零退出（便于排查），不会静默一直报 “not authenticated”。
 
 FROM debian:trixie
 
@@ -87,7 +88,17 @@ RUN opencode --version \
     && hermes --version \
     && multica version
 
-# 容器启动时：以容器自身 HOSTNAME 作为 daemon 设备名，前台拉起 multica daemon。
-# 用 exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号；
+# 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
+# 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# 容器启动时：以前台方式拉起 multica daemon。
+# entrypoint.sh 负责：
+#   - 校验 MULTICA_TOKEN 是否已注入（缺失则直接非零退出，便于排查）
+#   - 必要时用 MULTICA_TOKEN 固化登录态
+#   - 以容器自身 HOSTNAME 作为 daemon 设备名
+#   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
 # opencode / hermes / gstack 环境同样在镜像中可用。
-CMD export MULTICA_DAEMON_DEVICE_NAME="${HOSTNAME}" && exec multica daemon start --foreground
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["--no-auto-update"]

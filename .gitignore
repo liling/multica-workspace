@@ -1,4 +1,5 @@
-# Multica platform runtime / context files — not part of this project
-.agent_context/
-.multica/
-AGENTS.md
+# 含真实令牌，切勿提交
+.env
+.env.local
+# 本地构建产物
+*.log
