@@ -199,3 +199,26 @@ docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   如果 `printenv` 为空但 `docker compose up` 没报错，通常是 `.env` 放错目录、或 `.env` 里用了 `export`/引号导致值解析异常。
 - **想让一台机器跑多个 daemon**：复制一份 service，改成不同的 `container_name` / `hostname`，并使用各自独立的命名卷。
 - **自托管服务器**：设置 `MULTICA_SERVER_URL` 指向你的服务端。
+
+
+## 调试 / 进入容器
+
+entrypoint 默认会把 multica daemon 设为容器的 PID 1 并常驻运行，但你随时可以进到容器里手工调试：
+
+- **运行期间直接 exec**（最常用，不经过 entrypoint）：
+  ```bash
+  docker exec -it <容器名> bash
+  ```
+- **首次启动就进 shell、不拉 daemon**，用命令覆盖：
+  ```bash
+  docker compose run --rm <svc> bash
+  # 或
+  docker run --rm <镜像> bash
+  ```
+- **即使没配 `MULTICA_TOKEN` 也能进 shell**排查环境，设调试开关：
+  ```bash
+  docker run -e MULTICA_DEBUG_SHELL=1 <镜像> bash
+  ```
+  设了 `MULTICA_DEBUG_SHELL=1` 时，entrypoint 会跳过认证与 daemon，直接给出交互 shell。
+
+进 shell 后可手动操作：`multica login --token <令牌>`、`cat ~/.multica/config.json`、`multica auth status`、`printenv MULTICA_TOKEN` 等，方便定位认证或网络问题。

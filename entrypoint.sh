@@ -18,9 +18,24 @@
 #      不属于本工作区），立即以非零状态退出并给出排查提示，绝不带病启动 daemon。
 #   3) 二次确认 multica auth status 通过（令牌确实被服务端认可），再前台拉起 daemon。
 #
+# 调试 / 进入容器（重要，便于手工排障）：
+#   - 默认行为：exec 把 daemon 设为 PID 1，容器常驻运行。
+#   - 命令覆盖：用 `docker run --rm <镜像> bash`（或 `docker compose run <svc> bash`）
+#     即可覆盖默认命令，直接进入交互 shell，方便手工调试 / 执行一次性命令。
+#   - 调试开关：设置环境变量 MULTICA_DEBUG_SHELL=1 启动容器，会跳过认证与 daemon，
+#     直接给出交互 shell（即使没配 MULTICA_TOKEN 也能进，适合先排查环境）。
+#   - 容器运行期间也可随时 `docker exec -it <容器名> bash` 进到里面（不经过本脚本）。
+#
 set -euo pipefail
 
 echo "==> [multica-workspace] 启动前检查"
+
+# 0) 调试开关：最优先。设了 MULTICA_DEBUG_SHELL 就直接进 shell，
+#    跳过一切认证与 daemon（即使没配 MULTICA_TOKEN 也能进，方便先排查环境）。
+if [ -n "${MULTICA_DEBUG_SHELL:-}" ]; then
+  echo "==> MULTICA_DEBUG_SHELL 已设置，跳过认证与 daemon，进入调试 shell"
+  exec "${SHELL:-/bin/bash}"
+fi
 
 # 1) 必须有 MULTICA_TOKEN，否则明确失败退出
 if [ -z "${MULTICA_TOKEN:-}" ]; then
@@ -28,6 +43,8 @@ if [ -z "${MULTICA_TOKEN:-}" ]; then
   echo "   请在 .env 中配置 MULTICA_TOKEN（mul_... 用户 PAT 或 mcn_... Cloud Node PAT），"
   echo "   并通过 docker-compose 的 env_file 或 environment 注入到容器。"
   echo "   参考 README 的「快速开始」一节。"
+  echo "   如需先进入容器排查，可设置 MULTICA_DEBUG_SHELL=1 启动，或用："
+  echo "     docker compose run <svc> bash"
   exit 1
 fi
 echo "已检测到 MULTICA_TOKEN（长度 ${#MULTICA_TOKEN}）"
@@ -53,8 +70,14 @@ if ! multica auth status >/dev/null 2>&1; then
 fi
 echo "已用 MULTICA_TOKEN 固化登录态（config.json 已写入 token）"
 
-# 4) 前台拉起 daemon：设备名取容器自身 HOSTNAME（compose 里的 hostname），
-#    默认关闭 CLI 自更新，让镜像版本保持稳定、避免运行期联网拉取。
-echo "==> 以前台方式启动 multica daemon（设备名=${HOSTNAME}）"
-export MULTICA_DAEMON_DEVICE_NAME="${HOSTNAME}"
-exec multica daemon start --foreground --no-auto-update "$@"
+# 4) 决定最终启动什么：
+#    - 默认（未覆盖命令，或仅带 --no-auto-update）-> 以前台方式拉起 daemon；
+#    - 用户/compose 用 `run ... bash` 等覆盖了命令 -> 直接 exec 该命令（用于调试）。
+if [ "$#" -eq 0 ] || { [ "$#" -eq 1 ] && [ "$1" = "--no-auto-update" ]; }; then
+  echo "==> 以前台方式启动 multica daemon（设备名=${HOSTNAME}）"
+  export MULTICA_DAEMON_DEVICE_NAME="${HOSTNAME}"
+  exec multica daemon start --foreground --no-auto-update
+else
+  echo "==> 以覆盖命令启动：$*"
+  exec "$@"
+fi
