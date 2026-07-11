@@ -1,13 +1,19 @@
 name: Build and Push Docker Image
 
 # 在推送到默认分支（main）时，构建多架构镜像并推送到 GitHub Container Registry (GHCR)，
-# 推送完成后保留最近 3 个镜像版本、删除更旧的版本。
+# 推送 latest 浮动 tag。
+#
+# 注意：此前曾在此处加过 actions/delete-package-versions 的 prune 步骤
+# （min-versions-to-keep: 3）。该步骤在多架构 + SLSA attestation 场景下会删除
+# 镜像 manifest（amd64/arm64），但保留 index 与 attestation，导致 :latest
+# 变成“悬空 tag”——pull 时报 “manifest unknown”。因此这里**移除 prune 步骤**，
+# 让每次 push 都重新推一份完整、可拉的 :latest。
 "on":
   push:
     branches: [main]
   workflow_dispatch:
 
-# GITHUB_TOKEN 需要 packages:write 才能推送/删除 GHCR 镜像
+# GITHUB_TOKEN 需要 packages:write 才能推送 GHCR 镜像
 permissions:
   contents: read
   packages: write
@@ -40,12 +46,3 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ghcr.io/${{ github.repository }}:latest
-
-      - name: Prune old images (keep the latest 3 versions)
-        uses: actions/delete-package-versions@v5
-        with:
-          package-name: ${{ github.event.repository.name }}
-          package-type: container
-          owner: ${{ github.repository_owner }}
-          min-versions-to-keep: 3
-          token: ${{ secrets.GITHUB_TOKEN }}
