@@ -4,6 +4,13 @@
 # 以及 gstack（Garry Tan 的 Claude Code 技能集）所需运行环境，
 # 并在容器启动时拉起 multica daemon（前台运行）。
 #
+# 另外补充（见 issue MEM-12）：
+#   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
+#   - 预建 /root/.ssh 目录（权限 700）用于存放 SSH 密钥；该目录应通过卷持久化
+#     （见 README「数据卷」一节），避免容器重建后密钥丢失。
+#   - 容器默认工作目录（WORKDIR）设为 /workspace，方便 shell / 调试命令落地。
+#     （注意：multica daemon 的任务工作区仍在 ~/multica_workspaces，二者互不影响。）
+#
 # 安装方式（均经实测，x86_64 / arm64 glibc Linux 下可跑通）：
 #   - opencode : 官方脚本 https://opencode.ai/install
 #                -> 二进制落在 $HOME/.opencode/bin/opencode
@@ -47,6 +54,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
 #   nodejs        gstack 的 build / Playwright 运行需要全局 node
 #                （hermes 自带 node 仅在其 venv 内，不在全局 PATH）
+#   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -58,6 +66,7 @@ RUN apt-get update \
         ripgrep \
         ffmpeg \
         nodejs \
+        openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 opencode（官方脚本，非交互，自动选取最新版与匹配 CPU 的构建；
@@ -83,6 +92,13 @@ ENV HERMES_HOME=/root/.hermes \
 COPY scripts/gstack-install.sh /opt/gstack-install.sh
 RUN bash /opt/gstack-install.sh
 
+# 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
+#   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
+#     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
+#   - /workspace 作为容器默认工作目录（WORKDIR），方便 shell / 调试命令落地。
+RUN mkdir -p /root/.ssh /workspace \
+    && chmod 700 /root/.ssh
+
 # 构建期自检：确保三个二进制都真的可用（构建失败即暴露安装问题）
 RUN opencode --version \
     && hermes --version \
@@ -92,6 +108,9 @@ RUN opencode --version \
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# 容器默认工作目录设为 /workspace（任务/调试命令的落地目录，便于使用）。
+WORKDIR /workspace
 
 # 容器启动时：以前台方式拉起 multica daemon。
 # entrypoint.sh 负责：
