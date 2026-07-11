@@ -2,7 +2,7 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像，预装 **opencode**、**hermes**、**multica** 三个 CLI 以及 **gstack**（Claude Code 技能集）运行环境，容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。
+本仓库构建一个基于 Debian trixie 的镜像，预装 **opencode**、**hermes**、**multica** 三个 CLI 以及 **gstack**（Claude Code 技能集）运行环境，并附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/workspace`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
 
 - 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
 - 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
@@ -73,6 +73,7 @@ services:
       - opencode-data:/root/.local/share/opencode       # 凭据 auth.json、会话 DB、日志
       - opencode-cache:/root/.cache/opencode            # 缓存（丢了会重新拉取，可选）
       - agent-workspaces:/root/multica_workspaces       # 任务工作区
+      - ssh-keys:/root/.ssh                          # SSH 密钥（见 MEM-12，需持久化）
 
     restart: unless-stopped
 
@@ -83,6 +84,7 @@ volumes:
   opencode-data:
   opencode-cache:
   agent-workspaces:
+  ssh-keys:
 ```
 
 > **为什么用 `env_file` 而不是直接在 `environment:` 里写 `MULTICA_TOKEN: ${MULTICA_TOKEN:?...}`？**
@@ -142,6 +144,7 @@ daemon 主要通过环境变量配置。常用项：
 | `/root/.config/opencode` | opencode 配置（`opencode.jsonc`、插件依赖） |
 | `/root/.local/share/opencode` | opencode 凭据 `auth.json`、会话 DB、日志（**最关键，勿丢**） |
 | `/root/.cache/opencode` | opencode 缓存（可重建，持久化可选） |
+| `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
 
 ---
