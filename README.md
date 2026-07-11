@@ -2,7 +2,7 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像，预装 **opencode**、**hermes**、**multica** 三个 CLI 以及 **gstack**（Claude Code 技能集）运行环境，并附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/workspace`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+本仓库构建一个基于 Debian trixie 的镜像，预装 **pi**、**hermes**、**multica** 三个 CLI 以及 **gstack**（Claude Code 技能集）运行环境，并附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/workspace`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
 
 - 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
 - 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
@@ -68,10 +68,8 @@ services:
     volumes:
       - multica-state:/root/.multica                    # daemon id / multica 配置
       - hermes-state:/root/.hermes                      # hermes 数据目录（HERMES_HOME）
-      # opencode 遵循 XDG 目录，配置、凭据、状态分散三处，建议都持久化：
-      - opencode-config:/root/.config/opencode          # 配置（opencode.jsonc、插件依赖）
-      - opencode-data:/root/.local/share/opencode       # 凭据 auth.json、会话 DB、日志
-      - opencode-cache:/root/.cache/opencode            # 缓存（丢了会重新拉取，可选）
+      # pi 的配置 / 凭据 / 会话集中在 ~/.pi/agent/，建议持久化：
+      - pi-agent:/root/.pi/agent                        # 配置、凭据 auth.json、会话 DB、日志
       - agent-workspaces:/root/multica_workspaces       # 任务工作区
       - ssh-keys:/root/.ssh                          # SSH 密钥（见 MEM-12，需持久化）
 
@@ -80,9 +78,7 @@ services:
 volumes:
   multica-state:
   hermes-state:
-  opencode-config:
-  opencode-data:
-  opencode-cache:
+  pi-agent:
   agent-workspaces:
   ssh-keys:
 ```
@@ -90,10 +86,10 @@ volumes:
 > **为什么用 `env_file` 而不是直接在 `environment:` 里写 `MULTICA_TOKEN: ${MULTICA_TOKEN:?...}`？**
 > 两种方式都行。但后者依赖“运行 `docker compose` 的 shell 自己已经 `export` 了 `MULTICA_TOKEN`”，容易因为变量没导出、或在别处执行而拿到空值，进而触发 `not authenticated`。用同目录的 `.env` + `env_file` 最省心、首次启动即可用。
 
-> **关于 opencode 的配置目录**：opencode 不用单一目录，而是按 XDG 规范分散存放——
-> `~/.config/opencode`（配置 `opencode.jsonc`）、`~/.local/share/opencode`（**凭据 `auth.json`**、会话数据库、日志）、`~/.cache/opencode`（缓存）。
-> 其中最关键的是 `~/.local/share/opencode/auth.json`，它保存各模型 provider 的登录凭据；不持久化的话，容器重建后 opencode 会丢失登录、需要重新 `opencode auth login`。
-> 若想把配置固化进镜像（而非用卷），也可在 `Dockerfile` 里 `COPY` 一份 `opencode.jsonc` 到 `/root/.config/opencode/`，但凭据仍建议用卷或运行时注入，切勿写进镜像层。
+> **关于 pi 的配置目录**：pi 把配置、凭据、会话、扩展等数据集中存放在 `~/.pi/agent/` 目录下，
+> 其中最关键的是该目录下的 `auth.json`（保存各 provider 的登录凭据）。建议把 `/root/.pi/agent`
+> 通过卷持久化（见 compose 示例），否则容器重建后 pi 会丢失登录、需要重新 `/login`。
+> 与 opencode 不同，pi 不需要分散挂载 XDG 多处——单个卷即可覆盖全部状态。
 
 ### 4. 启动
 
@@ -141,9 +137,7 @@ daemon 主要通过环境变量配置。常用项：
 |---|---|
 | `/root/.multica` | multica daemon 身份（`daemon.id`）、CLI 配置 |
 | `/root/.hermes` | hermes 数据目录（`HERMES_HOME`） |
-| `/root/.config/opencode` | opencode 配置（`opencode.jsonc`、插件依赖） |
-| `/root/.local/share/opencode` | opencode 凭据 `auth.json`、会话 DB、日志（**最关键，勿丢**） |
-| `/root/.cache/opencode` | opencode 缓存（可重建，持久化可选） |
+| `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话 / 扩展等全部状态（**最关键，勿丢**） |
 | `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
 
@@ -176,15 +170,13 @@ docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   --env-file .env \
   -v multica-state:/root/.multica \
   -v hermes-state:/root/.hermes \
-  -v opencode-config:/root/.config/opencode \
-  -v opencode-data:/root/.local/share/opencode \
-  -v opencode-cache:/root/.cache/opencode \
+  -v pi-agent:/root/.pi/agent \
   -v agent-workspaces:/root/multica_workspaces \
   --restart unless-stopped \
   multica-workspace:local
 ```
 
-> 每次 `docker build` 会拉取当时最新的 opencode / hermes / multica；镜像本身不锁定版本号（如需锁定见 `Dockerfile` 顶部注释）。镜像支持 `linux/amd64` 与 `linux/arm64`。
+> 每次 `docker build` 会拉取当时最新的 pi / hermes / multica；镜像本身不锁定版本号（如需锁定见 `Dockerfile` 顶部注释）。镜像支持 `linux/amd64` 与 `linux/arm64`。
 
 ---
 

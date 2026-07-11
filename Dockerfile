@@ -1,8 +1,15 @@
 # syntax=docker/dockerfile:1
 #
-# 基于 Debian trixie 官方镜像，安装 opencode、hermes、multica 的最新版本，
+# 基于 Debian trixie 官方镜像，安装 pi、hermes、multica 的最新版本，
 # 以及 gstack（Garry Tan 的 Claude Code 技能集）所需运行环境，
 # 并在容器启动时拉起 multica daemon（前台运行）。
+#
+# 关于 pi（取代 opencode，参考 issue MEM-15）：
+#   opencode 在容器里运行时占用内存较高，容易触发 OOM；改用 Mario Zechner
+#   （earendil-works）的 pi 作为更轻量的终端编程 agent 替代。pi 是 Node/npm 包，
+#   通过 `npm install -g @earendil-works/pi-coding-agent` 安装，命令落在
+#   npm 全局 bin 目录（root 下为 /usr/local/bin/pi），配置/会话/凭据等
+#   数据落在 ~/.pi/agent/（建议通过卷持久化）。
 #
 # 另外补充（见 issue MEM-12）：
 #   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
@@ -13,8 +20,9 @@
 #   - 预装 GitHub CLI（gh），便于在容器内直接操作 GitHub（PR / issue / workflow 等）。
 #
 # 安装方式（均经实测，x86_64 / arm64 glibc Linux 下可跑通）：
-#   - opencode : 官方脚本 https://opencode.ai/install
-#                -> 二进制落在 $HOME/.opencode/bin/opencode
+#   - pi       : `npm install -g @earendil-works/pi-coding-agent`
+#                -> 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），
+#                   配置 / 凭据 / 会话在 ~/.pi/agent/
 #   - hermes   : 官方脚本 https://hermes-agent.nousresearch.com/install.sh
 #                -> root 下命令落在 /usr/local/bin/hermes，
 #                   代码在 /usr/local/lib/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
@@ -27,17 +35,17 @@
 #                -> root 下命令落在 /usr/local/bin/gh，已位于默认 PATH
 #
 # 说明：
-#   - opencode / hermes / multica 三个安装器均拉取“构建当时”的最新版本，
+#   - pi / hermes / multica 三个安装器均拉取“构建当时”的最新版本，
 #     因此每次 `docker build` 会得到当时最新的三者（镜像本身不锁定具体版本号）。
-#     若需锁定版本，可在 opencode 安装器后加 `--version <ver>`、
-#     在 hermes 安装器后加 `--commit <sha>`、在 multica 安装器后加 `--version <ver>`
+#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 hermes 安装器后加
+#     `--commit <sha>`、在 multica 安装器后加 `--version <ver>`
 #     （见各自官方文档）。
 #   - gstack 由随附脚本安装（Bun、Playwright Chromium、55 个技能等），版本随其仓库 HEAD。
-#   - opencode 安装器默认只修改 ~/.bashrc 的 PATH；容器内的非交互 shell
+#   - hermes 安装器默认只修改 ~/.bashrc 的 PATH；容器内的非交互 shell
 #     并不读取 .bashrc，因此这里用 ENV PATH 显式注入，确保
-#     `docker run --rm <img> opencode` / `hermes` 直接可用。
-#   - multica 安装器默认将二进制放入 /usr/local/bin（root 可写，已位于默认 PATH），
-#     故无需额外修改 PATH。
+#     `docker run --rm <img> hermes` / `multica` 直接可用。
+#   - multica 安装器与 npm 全局安装默认将二进制放入 /usr/local/bin（root 可写，
+#     已位于默认 PATH），故无需额外修改 PATH。
 #   - 镜像以 root 用户运行（与各安装器的默认布局一致）。
 #   - 认证说明（重要）：multica 的 daemon / CLI 只认 MULTICA_TOKEN 这个
 #     环境变量做认证；config.json 里的 token 字段、multica login 持久化的
@@ -53,12 +61,23 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # 基础依赖：
 #   bash          安装脚本以 #!/usr/bin/env bash 运行
-#   git/curl/tar/xz-utils/ca-certificates  opencode/hermes/multica 三个安装器运行所需
+#   git/curl/tar/xz-utils/ca-certificates  pi/hermes/multica 三个安装器运行所需
 #   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
 #   nodejs        gstack 的 build / Playwright 运行需要全局 node
 #                （hermes 自带 node 仅在其 venv 内，不在全局 PATH）
+#                pi 要求 Node >= 22.19.0，故下方通过 NodeSource 装 Node 22 LTS
+#                （覆盖 Debian trixie 自带的 Node 20）。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
+# pi 要求 Node >= 22.19.0（见其 package.json engines 字段），
+# 而 Debian trixie 默认 nodejs 是 20.x。这里从 NodeSource 装 Node 22 LTS，
+# 替换默认的 nodejs / npm，确保 pi 能跑起来。
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
         git \
@@ -70,11 +89,16 @@ RUN apt-get update \
         ffmpeg \
         nodejs \
         openssh-client \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && node --version \
+    && npm --version
 
-# 安装 opencode（官方脚本，非交互，自动选取最新版与匹配 CPU 的构建；
-# --no-modify-path 避免改动 /root/.bashrc，PATH 由下方 ENV 统一管理）
-RUN curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path
+# 安装 pi（取代 opencode，见 issue MEM-15）
+# pi 是 Node 包，用 `npm install -g` 全局安装即可：
+#   - `--ignore-scripts` 跳过可选的 postinstall 脚本（官方安装说明建议）；
+#   - 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），已位于默认 PATH；
+#   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 # 安装 hermes（--skip-setup 跳过交互式初始化向导；
 # 它会自行用 uv 拉取 Python 3.11 / Node 22 并安装依赖）
@@ -98,9 +122,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# 让两个命令在任意 shell 下都可用，并固定 hermes 的数据目录
-ENV HERMES_HOME=/root/.hermes \
-    PATH="/root/.opencode/bin:/usr/local/bin:${PATH}"
+# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh 已在默认 PATH 上）
+ENV HERMES_HOME=/root/.hermes
 
 # 安装 gstack 运行环境（Bun、Playwright Chromium、55 个技能等）。
 # 脚本随仓库提供（scripts/gstack-install.sh）；非交互、幂等。
@@ -116,8 +139,8 @@ RUN bash /opt/gstack-install.sh
 RUN mkdir -p /root/.ssh /workspace \
     && chmod 700 /root/.ssh
 
-# 构建期自检：确保三个二进制都真的可用（构建失败即暴露安装问题）
-RUN opencode --version \
+# 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）
+RUN pi --version \
     && hermes --version \
     && multica version \
     && gh --version
@@ -136,6 +159,6 @@ WORKDIR /workspace
 #   - 必要时用 MULTICA_TOKEN 固化登录态
 #   - 以容器自身 HOSTNAME 作为 daemon 设备名
 #   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
-# opencode / hermes / gstack 环境同样在镜像中可用。
+# pi / hermes / gstack 环境同样在镜像中可用。
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]

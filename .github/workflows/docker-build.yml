@@ -47,7 +47,7 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:latest
           # 复用 BuildKit 在 GitHub Actions 上的缓存后端（MEM-9）：
-          # 未改动的层（apt 基础依赖、opencode/hermes/multica 安装、
+          # 未改动的层（apt 基础依赖、pi/hermes/multica 安装、
           # gstack 的 Bun/Playwright Chromium 下载等）直接从缓存命中，
           # 只重跑真正变化的部分，把“小调整也要十几分钟”压缩到几分钟以内。
           # mode=max 缓存全部中间层，最大化命中率；缓存受 GitHub 7 天 TTL 约束，
