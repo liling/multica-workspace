@@ -102,7 +102,7 @@ docker compose logs -f      # 查看 daemon 日志
 
 容器启动后，`entrypoint.sh` 会先检查 `MULTICA_TOKEN` 是否已注入：
 - **缺令牌**：直接以非零状态退出，日志里明确提示“未设置 MULTICA_TOKEN”，不会静默一直报 `not authenticated`。
-- **有令牌但未登录**：自动用 `MULTICA_TOKEN` 执行 `multica login --token` 固化登录态（写入 config.json 的 token 字段，daemon 实际读取的就是这里）；若令牌无效则直接报错退出，不再带病启动。
+- **有令牌但未登录**：自动用 `MULTICA_TOKEN` 执行 `multica login --token` 固化登录态（写入 config.json 的 token 字段，daemon 实际读取的就是这里）；**执行 login 之前会先完成 `server_url` / `app_url` 配置**（默认官方地址，可用 `MULTICA_SERVER_URL` / `MULTICA_APP_URL` 覆盖），避免 `login` 报 “No server configured”。若令牌无效则直接报错退出，不再带病启动。
 
 启动后，在 Multica 平台的设备列表里应能看到一台名为 `multica-agent-01` 的设备上线，之后分配给它的任务会被自动领取并执行。
 
