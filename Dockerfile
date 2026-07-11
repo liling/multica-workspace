@@ -10,6 +10,7 @@
 #     （见 README「数据卷」一节），避免容器重建后密钥丢失。
 #   - 容器默认工作目录（WORKDIR）设为 /workspace，方便 shell / 调试命令落地。
 #     （注意：multica daemon 的任务工作区仍在 ~/multica_workspaces，二者互不影响。）
+#   - 预装 GitHub CLI（gh），便于在容器内直接操作 GitHub（PR / issue / workflow 等）。
 #
 # 安装方式（均经实测，x86_64 / arm64 glibc Linux 下可跑通）：
 #   - opencode : 官方脚本 https://opencode.ai/install
@@ -22,6 +23,8 @@
 #   - gstack   : scripts/gstack-install.sh（本仓库随附），克隆 gstack 仓库并 build
 #                其 browse 二进制、安装 Playwright Chromium、注册 55 个技能到
 #                ~/.claude/skills/。详见该脚本头注释。
+#   - gh      : GitHub 官方 apt 仓库 https://cli.github.com/packages（GitHub CLI）
+#                -> root 下命令落在 /usr/local/bin/gh，已位于默认 PATH
 #
 # 说明：
 #   - opencode / hermes / multica 三个安装器均拉取“构建当时”的最新版本，
@@ -81,6 +84,20 @@ RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --s
 # 二进制落在 /usr/local/bin/multica，已位于默认 PATH）
 RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 
+# 安装 GitHub CLI（gh）——官方 apt 仓库（cli.github.com）。
+# 便于在容器内直接操作 GitHub（PR / issue / workflow 等）。
+# 需要 gnupg 处理仓库签名密钥；gh 二进制落在 /usr/local/bin/gh，已位于默认 PATH。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gnupg \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+        > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
 # 让两个命令在任意 shell 下都可用，并固定 hermes 的数据目录
 ENV HERMES_HOME=/root/.hermes \
     PATH="/root/.opencode/bin:/usr/local/bin:${PATH}"
@@ -102,7 +119,8 @@ RUN mkdir -p /root/.ssh /workspace \
 # 构建期自检：确保三个二进制都真的可用（构建失败即暴露安装问题）
 RUN opencode --version \
     && hermes --version \
-    && multica version
+    && multica version \
+    && gh --version
 
 # 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
