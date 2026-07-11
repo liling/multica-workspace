@@ -2,7 +2,7 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像，预装 **pi**、**hermes**、**multica** 三个 CLI 以及 **gstack**（Claude Code 技能集）运行环境，并附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/workspace`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+本仓库构建一个基于 Debian trixie 的镜像，预装 **pi**、**hermes**、**multica** 三个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/workspace`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
 
 - 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
 - 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
