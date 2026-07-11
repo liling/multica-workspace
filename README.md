@@ -58,19 +58,31 @@ services:
       # 可选：并行执行的最大任务数
       # MULTICA_DAEMON_MAX_CONCURRENT_TASKS: 2
 
-    # 持久化状态，容器重建后不丢 daemon 身份、hermes 数据和工作区
+    # 持久化状态，容器重建后不丢 daemon 身份、各 CLI 配置/凭据和工作区
     volumes:
-      - multica-state:/root/.multica              # daemon id / 配置
-      - hermes-state:/root/.hermes                # hermes 数据目录（HERMES_HOME）
-      - agent-workspaces:/root/multica_workspaces # 任务工作区
+      - multica-state:/root/.multica                    # daemon id / multica 配置
+      - hermes-state:/root/.hermes                      # hermes 数据目录（HERMES_HOME）
+      # opencode 遵循 XDG 目录，配置、凭据、状态分散三处，建议都持久化：
+      - opencode-config:/root/.config/opencode          # 配置（opencode.jsonc、插件依赖）
+      - opencode-data:/root/.local/share/opencode       # 凭据 auth.json、会话 DB、日志
+      - opencode-cache:/root/.cache/opencode            # 缓存（丢了会重新拉取，可选）
+      - agent-workspaces:/root/multica_workspaces       # 任务工作区
 
     restart: unless-stopped
 
 volumes:
   multica-state:
   hermes-state:
+  opencode-config:
+  opencode-data:
+  opencode-cache:
   agent-workspaces:
 ```
+
+> **关于 opencode 的配置目录**：opencode 不用单一目录，而是按 XDG 规范分散存放——
+> `~/.config/opencode`（配置 `opencode.jsonc`）、`~/.local/share/opencode`（**凭据 `auth.json`**、会话数据库、日志）、`~/.cache/opencode`（缓存）。
+> 其中最关键的是 `~/.local/share/opencode/auth.json`，它保存各模型 provider 的登录凭据；不持久化的话，容器重建后 opencode 会丢失登录、需要重新 `opencode auth login`。
+> 若想把配置固化进镜像（而非用卷），也可在 `Dockerfile` 里 `COPY` 一份 `opencode.jsonc` 到 `/root/.config/opencode/`，但凭据仍建议用卷或运行时注入，切勿写进镜像层。
 
 ### 4. 启动
 
@@ -112,8 +124,11 @@ daemon 主要通过环境变量配置。常用项：
 
 | 路径 | 内容 |
 |---|---|
-| `/root/.multica` | daemon 身份（`daemon.id`）、CLI 配置 |
+| `/root/.multica` | multica daemon 身份（`daemon.id`）、CLI 配置 |
 | `/root/.hermes` | hermes 数据目录（`HERMES_HOME`） |
+| `/root/.config/opencode` | opencode 配置（`opencode.jsonc`、插件依赖） |
+| `/root/.local/share/opencode` | opencode 凭据 `auth.json`、会话 DB、日志（**最关键，勿丢**） |
+| `/root/.cache/opencode` | opencode 缓存（可重建，持久化可选） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
 
 ---
@@ -145,6 +160,9 @@ docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   -e MULTICA_TOKEN=mcn_xxxx \
   -v multica-state:/root/.multica \
   -v hermes-state:/root/.hermes \
+  -v opencode-config:/root/.config/opencode \
+  -v opencode-data:/root/.local/share/opencode \
+  -v opencode-cache:/root/.cache/opencode \
   -v agent-workspaces:/root/multica_workspaces \
   --restart unless-stopped \
   multica-workspace:local
