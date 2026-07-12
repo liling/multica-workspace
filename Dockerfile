@@ -15,8 +15,8 @@
 #   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
 #   - 预建 /root/.ssh 目录（权限 700）用于存放 SSH 密钥；该目录应通过卷持久化
 #     （见 README「数据卷」一节），避免容器重建后密钥丢失。
-#   - 容器默认工作目录（WORKDIR）设为 /workspace，方便 shell / 调试命令落地。
-#     （注意：multica daemon 的任务工作区仍在 ~/multica_workspaces，二者互不影响。）
+#   - 容器默认工作目录（WORKDIR）设为 /root/multica_workspaces，与 multica daemon
+#     的任务工作区基目录一致，方便 shell / 调试命令直接落在任务代码所在区域。
 #   - 预装 GitHub CLI（gh），便于在容器内直接操作 GitHub（PR / issue / workflow 等）。
 #
 # 安装方式（均经实测，x86_64 / arm64 glibc Linux 下可跑通）：
@@ -154,9 +154,10 @@ ENV HERMES_HOME=/root/.hermes
 # 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
 #   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
 #     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
-#   - /workspace 作为容器默认工作目录（WORKDIR），方便 shell / 调试命令落地。
+#   - /root/multica_workspaces 作为容器默认工作目录（WORKDIR），与 daemon 任务
+#     工作区基目录一致（运行期由 agent-workspaces 卷覆盖）。
 # pi 扩展（pi-subagents / pi-gstack）数据落在 ~/.pi/agent/，由上面卷映射持久化。
-RUN mkdir -p /root/.ssh /workspace \
+RUN mkdir -p /root/.ssh /root/multica_workspaces \
     && chmod 700 /root/.ssh
 
 # 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）。
@@ -172,8 +173,9 @@ RUN pi --version \
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# 容器默认工作目录设为 /workspace（任务/调试命令的落地目录，便于使用）。
-WORKDIR /workspace
+# 容器默认工作目录设为 /root/multica_workspaces（与 daemon 任务工作区基目录一致，
+# 方便 docker exec 进容器后直接落在任务代码所在区域）。
+WORKDIR /root/multica_workspaces
 
 # 容器启动时：以前台方式拉起 multica daemon。
 # entrypoint.sh 负责：
