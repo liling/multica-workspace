@@ -101,8 +101,12 @@ jobs:
           echo "Using endpoint prefix: ${PREFIX}"
 
           # 1) 拿全部 version id（API 默认按 created_at desc 排序，正好“留最新 N”）
+          # 注意：--paginate --slurp 会把每一页的 JSON（本身是个数组）再塞进
+          # 顶层数组里，结果是 array-of-arrays，形如 [[v1,v2],[v3,v4]]。
+          # 所以提取 id 要先展开一层：.[][].id，直接写 .[].id 会对内层数组
+          # 取 .id 报 "Cannot index array with string \"id\""，整个 prune step 挂掉。
           VERSIONS_JSON=$(gh api "${PREFIX}/${PACKAGE}/versions?per_page=100" --paginate --slurp)
-          VERSION_IDS=$(printf '%s' "$VERSIONS_JSON" | jq -r '.[].id')
+          VERSION_IDS=$(printf '%s' "$VERSIONS_JSON" | jq -r '.[][].id')
           TOTAL=$(printf '%s\n' "$VERSION_IDS" | grep -c .)
           echo "Found $TOTAL versions on ${PACKAGE} (KEEP=${KEEP})"
           if [ "$TOTAL" -le "$KEEP" ]; then
