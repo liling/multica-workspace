@@ -40,6 +40,13 @@
 #                镜像默认通过卷持久化 /root/.pi/agent（见 README）。
 #   - gh      : GitHub 官方 apt 仓库 https://cli.github.com/packages（GitHub CLI）
 #                -> root 下命令落在 /usr/local/bin/gh，已位于默认 PATH
+#   - obscura : Rust 写的无头浏览器引擎（https://github.com/h4ckf0r0day/obscura），
+#                通过 Chrome DevTools Protocol 对外服务，是 headless Chrome 的平替——
+#                Puppeteer / Playwright 直连 ws://127.0.0.1:9222 即可用，无需改业务代码。
+#                自带 V8、无 Chrome / Node.js / 其他运行期依赖；预编译二进制从 GitHub
+#                Releases 拉（x86_64 / aarch64），装到 /usr/local/bin/obscura 与
+#                /usr/local/bin/obscura-worker。本镜像以 Obscura 作为**唯一**浏览器引擎，
+#                刻意不安装 Chrome / Chromium / Playwright Chromium（构建期自检保证）。
 #
 # 说明：
 #   - pi / hermes / multica / pi 扩展四个安装器均拉取“构建当时”的最新版本，
@@ -74,16 +81,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   bash          安装脚本以 #!/usr/bin/env bash 运行
 #   git/curl/tar/xz-utils/ca-certificates  pi/hermes/multica 三个安装器运行所需
 #   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
-#   nodejs        pi 要求 Node >= 22.19.0（见其 package.json engines 字段），
-#                 而 Debian trixie 默认 nodejs 是 20.x。这里从 NodeSource 装
-#                 Node 22 LTS，替换默认的 nodejs / npm，确保 pi 能跑起来。
-#                 pi 扩展（pi-subagents / pi-gstack）作为 npm 包安装，pi 装好即可用。
+#   nodejs        pi 要求 Node >= 22.19.0（package.json engines 字段，是「下限」
+#                 而非上限，故 Node 24 同样满足、官方支持）。Debian trixie 默认 nodejs
+#                 较旧（20.x），这里从 NodeSource 的 node_24.x 通道装 Node 24，替换默认
+#                 的 nodejs / npm。hermes 自带独立运行期、不依赖系统 Node，故系统 Node
+#                 升到 24 不影响 hermes；pi / pi 扩展作为 npm 包在 Node 24 上正常运行。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+    && echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -148,7 +156,31 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh 已在默认 PATH 上）
+# 安装 Obscura（issue MEM-22）—— 镜像里唯一的浏览器引擎，取代 headless Chrome。
+# Obscura 是用 Rust 写的无头浏览器：自带 V8 跑真实 JS、对外暴露 Chrome DevTools
+# Protocol（CDP），Puppeteer / Playwright 直连 ws://127.0.0.1:9222 即可当成 headless
+# Chrome 用（"换二进制不换代码"）。预编译产物自包含、无 Chrome / Node.js / 其他依赖。
+# 命令：obscura fetch <url>（一次性抓取渲染）/ obscura serve（起 CDP 服务，端口 9222）
+#       / obscura scrape（并发抓取）/ obscura mcp（MCP server，供 AI agent 调用）。
+# 从 GitHub Releases 拉官方预编译二进制（amd64->x86_64 / arm64->aarch64）；归档根目录
+# 直接含 obscura 与 obscura-worker 两个文件。Linux 预编译要求 glibc >= 2.35，Debian
+# trixie 自带 glibc 2.41，满足。两个二进制都装进 /usr/local/bin/（已在默认 PATH 上）。
+RUN set -eux; \
+    case "$(dpkg --print-architecture)" in \
+        amd64) OBSCURA_ARCH=x86_64  ;; \
+        arm64) OBSCURA_ARCH=aarch64 ;; \
+        *) echo "不支持的架构，无法安装 Obscura: $(dpkg --print-architecture)"; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://github.com/h4ckf0r0day/obscura/releases/latest/download/obscura-${OBSCURA_ARCH}-linux.tar.gz" \
+        -o /tmp/obscura.tar.gz; \
+    mkdir -p /tmp/obscura-extract; \
+    tar xzf /tmp/obscura.tar.gz -C /tmp/obscura-extract; \
+    install -m 0755 /tmp/obscura-extract/obscura        /usr/local/bin/obscura; \
+    install -m 0755 /tmp/obscura-extract/obscura-worker  /usr/local/bin/obscura-worker; \
+    rm -rf /tmp/obscura-extract /tmp/obscura.tar.gz; \
+    obscura --version
+
+# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh / obscura 已在默认 PATH 上）
 ENV HERMES_HOME=/root/.hermes
 
 # 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
@@ -163,10 +195,24 @@ RUN mkdir -p /root/.ssh /root/multica_workspaces \
 # 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）。
 # pi 扩展不强制自检：它们在首次 `pi` 启动时才加载，构建期未启动 pi 会话时
 # 静默运行也无意义；如果扩展有问题会在第一次使用时立刻报错。
-RUN pi --version \
-    && hermes --version \
-    && multica version \
-    && gh --version
+# 同时保证「镜像里没有 Chrome / Chromium」：本镜像以 Obscura 作为唯一浏览器引擎
+# （见上方 Obscura 安装步骤），任何 chrome/chromium 二进制出现在 PATH 上都视为
+# 构建异常并中止，防止后续改动把 Chromium 偷偷带回来。（注：Playwright 缓存
+# ~/.cache/ms-playwright/ 不在 PATH 上，由 hermes --skip-browser 与 pi-gstack 的
+# 按需安装策略在构建期规避，详见 README「浏览器：Obscura」一节。）
+RUN set -eux; \
+    pi --version; \
+    hermes --version; \
+    multica version; \
+    gh --version; \
+    obscura --version; \
+    for b in chromium chromium-browser google-chrome google-chrome-stable chrome; do \
+        if command -v "$b" >/dev/null 2>&1; then \
+            echo "错误：检测到 $b。本镜像以 Obscura 作为唯一浏览器引擎，不应安装 Chrome/Chromium。"; \
+            exit 1; \
+        fi; \
+    done; \
+    echo "自检通过：pi / hermes / multica / gh / obscura 均可用，且无 Chrome/Chromium。"
 
 # 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。

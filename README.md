@@ -2,7 +2,7 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像，预装 **pi**、**hermes**、**multica** 三个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi**、**hermes**、**multica** 三个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
 
 - 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
 - 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
@@ -140,6 +140,64 @@ daemon 主要通过环境变量配置。常用项：
 | `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话 / 扩展等全部状态（**最关键，勿丢**） |
 | `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
+
+---
+
+## 浏览器：Obscura（取代 headless Chrome）
+
+本镜像以 [**Obscura**](https://github.com/h4ckf0r0day/obscura) 作为**唯一**的浏览器引擎，刻意**不安装 Chrome / Chromium / Playwright Chromium**——Dockerfile 构建期自检会确保 PATH 上不存在任何 `chrome`/`chromium` 二进制，存在即中止构建。Obscura 是用 Rust 写的无头浏览器：自带 V8、跑真实 JavaScript、对外暴露 [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)（CDP），定位就是 headless Chrome 的平替——**换二进制不换代码**，Puppeteer / Playwright 直连即可。
+
+- 二进制位置：`/usr/local/bin/obscura`、`/usr/local/bin/obscura-worker`（已在默认 PATH 上）。
+- 冷启动近乎即时、常驻内存 ~30MB、预编译二进制 ~70MB，比 headless Chrome 轻得多。
+- Linux 预编译产物要求 glibc >= 2.35；Debian trixie 自带 glibc 2.41，满足。支持 `linux/amd64` 与 `linux/arm64`。
+
+### 常用命令
+
+一次性抓取渲染后的页面（最常用，无需起服务）：
+
+```bash
+# 拿页面标题
+obscura fetch https://example.com --eval "document.title"
+# 渲染后整页 HTML / 纯文本 / 外链
+obscura fetch https://news.ycombinator.com --dump html
+obscura fetch https://example.com --dump text
+obscura fetch https://example.com --dump links
+# 走代理
+obscura --proxy socks5://127.0.0.1:1080 fetch https://example.com --dump text
+```
+
+起一个 CDP 服务，给 Puppeteer / Playwright 连（默认端口 9222，默认绑 127.0.0.1）：
+
+```bash
+obscura serve --port 9222            # 需要反指纹 / 拦截追踪可加 --stealth
+obscura serve --workers 4            # 按 CPU 核数开多 worker
+```
+
+连上去用（Puppeteer / Playwright 代码完全不变，只改连接端点）：
+
+```js
+// Playwright
+const browser = await chromium.connectOverCDP("ws://127.0.0.1:9222");
+// Puppeteer
+const browser = await puppeteer.connect({ browserWSEndpoint: "ws://127.0.0.1:9222/devtools/browser" });
+```
+
+并发抓取 / 给 AI agent 当 MCP server：
+
+```bash
+obscura scrape url1 url2 url3 --concurrency 25 --eval "document.title" --format json
+obscura mcp                          # stdio（默认），供 Claude Desktop / Cursor 等
+obscura mcp --http --port 8080       # endpoint: http://127.0.0.1:8080/mcp
+```
+
+> Obscura 的 CDP 服务**无内置鉴权**——能连到端口就能驱动浏览器。镜像内默认按需启动（agent 需要时自己 `obscura serve` 或 `obscura fetch`），不在 entrypoint 里常驻一个对外的 CDP 端口。若要在容器外暴露，务必只绑 `127.0.0.1` 并经 SSH 转发，或放在带鉴权的反代后面，不要把 9222 直接 `0.0.0.0` 暴露到公网。
+
+### 关于 Playwright Chromium（重要）
+
+镜像**构建期**不安装任何 Chromium。需要注意的唯一运行期路径：
+
+- **hermes**：构建时已加 `--skip-browser`，不会下载 Playwright/Chromium（其 browser tools 默认不可用；如需让 hermes 走 Obscura，可参考社区插件 [hermes-plugin-obscura](https://github.com/SGavrl/hermes-plugin-obscura)，由它按会话起 `obscura serve` 并通过 CDP 驱动）。
+- **pi-gstack**：扩展本体不下载 Chromium，但其 `/gstack-build` 在**首次构建** gstack 的 browse 二进制时会**按需**安装 Playwright Chromium 到 `~/.cache/ms-playwright/`（运行期行为，非镜像层）。如果你希望连这条路径也彻底走 Obscura、完全不引入 Chromium，**不要运行 `/gstack-build`**，浏览统一用 `obscura` 命令；或运行后手动 `rm -rf ~/.cache/ms-playwright`。
 
 ---
 
