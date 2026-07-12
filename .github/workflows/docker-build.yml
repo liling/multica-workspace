@@ -1,19 +1,25 @@
 name: Build and Push Docker Image
 
 # 在推送到默认分支（main）时，构建多架构镜像并推送到 GitHub Container Registry (GHCR)，
-# 推送 latest 浮动 tag。
+# 推送 latest 浮动 tag 以及按 commit 短 sha 的不可变 tag，最后清理老版本。
 #
-# 注意：此前曾在此处加过 actions/delete-package-versions 的 prune 步骤
-# （min-versions-to-keep: 3）。该步骤在多架构 + SLSA attestation 场景下会删除
-# 镜像 manifest（amd64/arm64），但保留 index 与 attestation，导致 :latest
-# 变成“悬空 tag”——pull 时报 “manifest unknown”。因此这里**移除 prune 步骤**，
-# 让每次 push 都重新推一份完整、可拉的 :latest。
+# 历史注记：早期只用 :latest 浮动 tag，曾在此处加过 actions/delete-package-versions
+# 的 prune 步骤（min-versions-to-keep: 3）。该步骤在多架构 + SLSA attestation 场景下
+# 会删除镜像 manifest（amd64/arm64），但保留 index 与 attestation，导致 :latest
+# 变成“悬空 tag”——pull 时报 “manifest unknown”。因此当时**移除 prune 步骤**。
+#
+# 现在（MEM-17）：参照 liling/hindsight 的 build-custom.yml，把打 tag 方式改成
+#   :latest + :${{ github.sha }}
+# 这样每次 push 至少推 2 个 tag，老 commit 的具体 sha 仍能引到对应 manifest，
+# 再结合下面的 prune step（保留最近 KEEP=10 个 version，跳过任何挂着 :latest 的
+# version）就能持续把历史压住，同时不会让 :latest 变悬空。
 "on":
   push:
     branches: [main]
   workflow_dispatch:
 
-# GITHUB_TOKEN 需要 packages:write 才能推送 GHCR 镜像
+# GITHUB_TOKEN 需要 packages:write 才能推送 GHCR 镜像；
+# prune step 还需要 list/delete 包版本，对 workflow 自身 repo，packages:write 即够。
 permissions:
   contents: read
   packages: write
@@ -45,7 +51,10 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          # :latest 浮动 + 不可变 short-sha tag，并行见 MEM-17。
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
           # 复用 BuildKit 在 GitHub Actions 上的缓存后端（MEM-9）：
           # 未改动的层（apt 基础依赖、pi/hermes/multica 安装、
           # pi 扩展 npm 包下载等）直接从缓存命中，
@@ -54,3 +63,38 @@ jobs:
           # 到期或改了 Dockerfile 后会自动重新拉取各 CLI 的最新版本。
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # 参照 liling/hindsight 的 build-custom.yml 做老版本回收。
+      # 关键护栏：对每个候选 version，先查它身上的 tags 列表，
+      # 若 `latest` 在里面就跳过，避免 :latest 变成悬空 tag。
+      - name: Prune old GHCR package versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_NAME: ${{ github.repository }}
+          KEEP: '10'
+        run: |
+          set -u
+          # 1) 拿全部 version id（API 默认按 created_at desc 排序，正好“留最新 N”）
+          VERSIONS_JSON=$(gh api "user/packages/container/${IMAGE_NAME}/versions?per_page=100" --paginate --slurp)
+          VERSION_IDS=$(printf '%s' "$VERSIONS_JSON" | jq -r '.[].id')
+          TOTAL=$(printf '%s\n' "$VERSION_IDS" | grep -c .)
+          echo "Found $TOTAL versions on ${IMAGE_NAME} (KEEP=${KEEP})"
+          if [ "$TOTAL" -le "$KEEP" ]; then
+            echo "Nothing to clean up"; exit 0
+          fi
+
+          # 2) 留最新 KEEP 个，其余逐个处理；保护任何挂着 :latest 的 version
+          printf '%s\n' "$VERSION_IDS" | tail -n +$((KEEP + 1)) | while read -r vid; do
+            [ -z "$vid" ] && continue
+            TAGS_JSON=$(gh api "user/packages/container/${IMAGE_NAME}/versions/${vid}" \
+                        -q '.metadata.container.tags // []')
+            TAGS=$(printf '%s' "$TAGS_JSON" | jq -r '.[]' 2>/dev/null || true)
+            if printf '%s\n' "$TAGS" | grep -qx 'latest'; then
+              echo "Skip version $vid (carries :latest tag)"
+              continue
+            fi
+            echo "Deleting version $vid (tags: $(printf '%s,' $TAGS | sed 's/,$//'))"
+            gh api -X DELETE "user/packages/container/${IMAGE_NAME}/versions/${vid}" || \
+              echo "  -> delete failed for $vid (continuing)"
+          done
+          echo "Prune step done"
