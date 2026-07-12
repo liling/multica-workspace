@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # 基于 Debian trixie 官方镜像，安装 pi、hermes、multica 的最新版本，
-# 以及 gstack（Garry Tan 的 Claude Code 技能集）所需运行环境，
+# 以及 pi 扩展形式的 gstack / subagents 适配层，
 # 并在容器启动时拉起 multica daemon（前台运行）。
 #
 # 关于 pi（取代 opencode，参考 issue MEM-15）：
@@ -30,19 +30,28 @@
 #                   跳过 setup 向导与 Playwright/Chromium 下载以省流量。
 #   - multica  : 官方脚本 https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh
 #                -> root 下命令落在 /usr/local/bin/multica（已位于默认 PATH）
-#   - gstack   : scripts/gstack-install.sh（本仓库随附），克隆 gstack 仓库并 build
-#                其 browse 二进制、安装 Playwright Chromium、注册 55 个技能到
-#                ~/.claude/skills/。详见该脚本头注释。
+#   - pi 扩展 : 通过 pi CLI 安装 npm 包形式的 gstack / subagents 适配层（见 issue MEM-18）：
+#                pi install npm:pi-subagents  -> pi 原生子智能体委托扩展
+#                pi install npm:pi-gstack      -> 把 Garry Tan 的 gstack 技能与工作流
+#                                                以 pi 扩展形式适配进 pi（运行时按需
+#                                                拉取上游 gstack 仓库，并注册为
+#                                                /gstack-* 命名空间技能）。
+#                两包都落到 ~/.pi/agent/ 下（npm 包目录 + settings.json 条目），
+#                镜像默认通过卷持久化 /root/.pi/agent（见 README）。
 #   - gh      : GitHub 官方 apt 仓库 https://cli.github.com/packages（GitHub CLI）
 #                -> root 下命令落在 /usr/local/bin/gh，已位于默认 PATH
 #
 # 说明：
-#   - pi / hermes / multica 三个安装器均拉取“构建当时”的最新版本，
-#     因此每次 `docker build` 会得到当时最新的三者（镜像本身不锁定具体版本号）。
+#   - pi / hermes / multica / pi 扩展四个安装器均拉取“构建当时”的最新版本，
+#     因此每次 `docker build` 会得到当时最新的全部组件（镜像本身不锁定具体版本号）。
 #     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 hermes 安装器后加
-#     `--commit <sha>`、在 multica 安装器后加 `--version <ver>`
-#     （见各自官方文档）。
-#   - gstack 由随附脚本安装（Bun、Playwright Chromium、55 个技能等），版本随其仓库 HEAD。
+#     `--commit <sha>`、在 multica 安装器后加 `--version <ver>`、在 pi 扩展上
+#     加 `@<ver>`（见各自官方文档）。
+#   - 相对于原先的 scripts/gstack-install.sh 方案（克隆 gstack、安装 Bun、
+#     拉 Playwright Chromium、把技能注册到 ~/.claude/skills/），现在改走
+#     pi 扩展后不再需要 Bun / Playwright / 任何额外系统层依赖，更轻量且与
+#     pi 生态对齐。pi-gstack 在首次 `/gstack-build` 时按需编译 gstack
+#     的 browse 二进制及安装 Playwright Chromium（非镜像构建期）。
 #   - hermes 安装器默认只修改 ~/.bashrc 的 PATH；容器内的非交互 shell
 #     并不读取 .bashrc，因此这里用 ENV PATH 显式注入，确保
 #     `docker run --rm <img> hermes` / `multica` 直接可用。
@@ -65,14 +74,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   bash          安装脚本以 #!/usr/bin/env bash 运行
 #   git/curl/tar/xz-utils/ca-certificates  pi/hermes/multica 三个安装器运行所需
 #   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
-#   nodejs        gstack 的 build / Playwright 运行需要全局 node
-#                （hermes 自带 node 仅在其 venv 内，不在全局 PATH）
-#                pi 要求 Node >= 22.19.0，故下方通过 NodeSource 装 Node 22 LTS
-#                （覆盖 Debian trixie 自带的 Node 20）。
+#   nodejs        pi 要求 Node >= 22.19.0（见其 package.json engines 字段），
+#                 而 Debian trixie 默认 nodejs 是 20.x。这里从 NodeSource 装
+#                 Node 22 LTS，替换默认的 nodejs / npm，确保 pi 能跑起来。
+#                 pi 扩展（pi-subagents / pi-gstack）作为 npm 包安装，pi 装好即可用。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
-# pi 要求 Node >= 22.19.0（见其 package.json engines 字段），
-# 而 Debian trixie 默认 nodejs 是 20.x。这里从 NodeSource 装 Node 22 LTS，
-# 替换默认的 nodejs / npm，确保 pi 能跑起来。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -101,6 +107,19 @@ RUN apt-get update \
 #   - 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），已位于默认 PATH；
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+# 安装 pi 扩展（gstack / subagents 适配层，见 issue MEM-18）：
+#   此前 Dockerfile 通过 scripts/gstack-install.sh 克隆 gstack 仓库、装 Bun / Playwright
+#   Chromium 并把技能注册到 ~/.claude/skills/，镜像很大且与 pi 生态脱节。这里改为直接
+#   通过 pi 把这两个 npm 扩展装进 ~/.pi/agent/，省掉 Bun / Playwright 等系统依赖：
+#     - pi install npm:pi-subagents  提供 pi 原生子智能体委托（reviewer / scout / oracle 等）
+#     - pi install npm:pi-gstack      把 Garry Tan 的 gstack 技能与工作流以 pi 扩展形式
+#                                       适配进 pi；首次 /gstack-build 时按需拉上游仓库、
+#                                       编译 browse 二进制、装 Playwright Chromium。
+#   每条 pi install 只 write settings.json + 下载一个 npm 包到 ~/.pi/agent/npm/，
+#   不引入任何 postinstall 之外的额外系统依赖。失败立即暴露（构建失败即报错）。
+RUN pi install npm:pi-subagents \
+    && pi install npm:pi-gstack
 
 # 安装 hermes（issue MEM-16）：
 #   --skip-setup   跳过交互式初始化向导（容器内无 tty，原本也会被安装器自动跳过；
@@ -132,21 +151,17 @@ RUN apt-get update \
 # 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh 已在默认 PATH 上）
 ENV HERMES_HOME=/root/.hermes
 
-# 安装 gstack 运行环境（Bun、Playwright Chromium、55 个技能等）。
-# 脚本随仓库提供（scripts/gstack-install.sh）；非交互、幂等。
-# 默认把 gstack 注册为 Claude Code 风格技能（短名 /qa、/review…）到
-# ~/.claude/skills/。改用命名空间 /gstack-qa 可在脚本内设置 SETUP_PREFIX=1。
-COPY scripts/gstack-install.sh /opt/gstack-install.sh
-RUN bash /opt/gstack-install.sh
-
 # 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
 #   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
 #     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
 #   - /workspace 作为容器默认工作目录（WORKDIR），方便 shell / 调试命令落地。
+# pi 扩展（pi-subagents / pi-gstack）数据落在 ~/.pi/agent/，由上面卷映射持久化。
 RUN mkdir -p /root/.ssh /workspace \
     && chmod 700 /root/.ssh
 
-# 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）
+# 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）。
+# pi 扩展不强制自检：它们在首次 `pi` 启动时才加载，构建期未启动 pi 会话时
+# 静默运行也无意义；如果扩展有问题会在第一次使用时立刻报错。
 RUN pi --version \
     && hermes --version \
     && multica version \
@@ -166,6 +181,6 @@ WORKDIR /workspace
 #   - 必要时用 MULTICA_TOKEN 固化登录态
 #   - 以容器自身 HOSTNAME 作为 daemon 设备名
 #   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
-# pi / hermes / gstack 环境同样在镜像中可用。
+# pi / hermes / pi 扩展（pi-subagents、pi-gstack）环境同样在镜像中可用。
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]
