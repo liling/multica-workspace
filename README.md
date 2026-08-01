@@ -2,7 +2,9 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi**、**hermes**、**multica** 三个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi**、**codex**（OpenAI Codex CLI）、**hermes**、**multica** 四个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+
+其中 **pi / codex / hermes** 三个都是可用的「编程 agent harness」：任务里的 agent 可按需选用任意一个（`pi` / `codex` / `hermes`）来执行编码、审查等子任务；`multica daemon` 仍是容器的 PID 1，负责领取与调度平台任务。
 
 - 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
 - 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
@@ -70,6 +72,8 @@ services:
       - hermes-state:/root/.hermes                      # hermes 数据目录（HERMES_HOME）
       # pi 的配置 / 凭据 / 会话集中在 ~/.pi/agent/，建议持久化：
       - pi-agent:/root/.pi/agent                        # 配置、凭据 auth.json、会话 DB、日志
+      # codex 的配置 / 凭据 / 会话集中在 ~/.codex/，建议持久化（见下方「codex」一节）：
+      - codex-state:/root/.codex                        # config.toml、auth.json、sessions/
       - agent-workspaces:/root/multica_workspaces       # 任务工作区
       - ssh-keys:/root/.ssh                          # SSH 密钥（见 MEM-12，需持久化）
 
@@ -79,6 +83,7 @@ volumes:
   multica-state:
   hermes-state:
   pi-agent:
+  codex-state:
   agent-workspaces:
   ssh-keys:
 ```
@@ -138,8 +143,19 @@ daemon 主要通过环境变量配置。常用项：
 | `/root/.multica` | multica daemon 身份（`daemon.id`）、CLI 配置 |
 | `/root/.hermes` | hermes 数据目录（`HERMES_HOME`） |
 | `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话 / 扩展等全部状态（**最关键，勿丢**） |
+| `/root/.codex` | codex 配置 `config.toml` / 凭据 `auth.json` / 会话（可用 `CODEX_HOME` 覆盖） |
 | `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
+
+---
+
+## codex（OpenAI Codex CLI）
+
+镜像预装了 [**Codex CLI**](https://github.com/openai/codex)（OpenAI 的本地编程 agent，`npm install -g @openai/codex`），与 pi / hermes 并列为三个可选的 agent harness：任务里的 agent 可按需 `codex` 调用（例如 `codex exec "..."` 非交互执行、`codex` 进交互式 TUI）。与 multica daemon 不同，**codex 本身不接入 Multica 平台调度**——它只是容器里一个可用的 CLI，是否被调用完全取决于任务里 agent 的选择。
+
+- **认证（重要）**：codex 不读 `MULTICA_TOKEN`，需单独登录。进入容器后执行 `codex login`（选 **Sign in with ChatGPT** 用 ChatGPT Plus/Pro 额度），或设置 `OPENAI_API_KEY` 环境变量走 API key。详见 [官方认证文档](https://developers.openai.com/codex/auth)。
+- **配置 / 会话目录**：全部状态集中在 `~/.codex/`（`config.toml`、`auth.json`、`sessions/`），可用 `CODEX_HOME` 环境变量覆盖。**建议把 `/root/.codex` 挂成卷持久化**（见上方 compose 示例），否则容器重建后 codex 会丢失登录态、需重新 `codex login`。
+- **多架构**：npm 包本体是 JS launcher，原生二进制经 `optionalDependencies` 按平台拉取（amd64 命中 `@openai/codex-linux-x64`、arm64 命中 `@openai/codex-linux-arm64`），因此 `linux/amd64` 与 `linux/arm64` 镜像均开箱即用，无需架构分支。
 
 ---
 
@@ -229,6 +245,7 @@ docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   -v multica-state:/root/.multica \
   -v hermes-state:/root/.hermes \
   -v pi-agent:/root/.pi/agent \
+  -v codex-state:/root/.codex \
   -v agent-workspaces:/root/multica_workspaces \
   --restart unless-stopped \
   multica-workspace:local
