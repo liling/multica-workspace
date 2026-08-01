@@ -160,8 +160,22 @@ RUN npm install -g @openai/codex
 #                                       编译 browse 二进制、装 Playwright Chromium。
 #   每条 pi install 只 write settings.json + 下载一个 npm 包到 ~/.pi/agent/npm/，
 #   不引入任何 postinstall 之外的额外系统依赖。失败立即暴露（构建失败即报错）。
+#   额外一步（issue MEM-26）：装完后把这两个扩展在 settings.json 里的 source 固定为
+#   「构建当时」的确切版本（npm:pi-subagents@<ver> / npm:pi-gstack@<ver>）。pi 的交互式
+#   启动会拿 settings.json 里的 source 与 npm registry 最新版比较、不一致就弹
+#   「Package Updates Available / Run pi update --extensions」提示（见 pi 源码
+#   interactive-mode.checkForPackageUpdates → package-manager.checkForAvailableUpdates：
+#   命中 PI_OFFLINE 或 source 为带确切版本的 pinned spec 时跳过）。容器里这条提示既
+#   无用又误导——它建议的 `pi update --extensions` 在容器内执行后会随容器重建而丢失，
+#   正确的升级方式是重建镜像。带确切版本的 source 会被 pi 判定为 pinned 从而跳过该
+#   检查（packages.md：「Versioned specs are pinned and skipped by package updates」），
+#   运行期不再弹提示；而每次重建镜像仍拉取当时的最新版，仍满足「镜像不锁定版本号、
+#   构建当时最新」的整体策略。注：因 /root/.pi/agent 以卷持久化，此 pinning 只对「空卷
+#   首启」生效；旧卷里残留的未固定 settings.json 需删掉对应条目让 pi 重写，或手动改。
 RUN pi install npm:pi-subagents \
-    && pi install npm:pi-gstack
+    && pi install npm:pi-gstack \
+    && node -e 'const fs=require("fs");const d="/root/.pi/agent";const p=d+"/settings.json";const s=JSON.parse(fs.readFileSync(p,"utf8"));s.packages=s.packages.map(function(x){const m=/^npm:(.+)$/.exec(x);if(!m)return x;const n=m[1];let v;try{v=JSON.parse(fs.readFileSync(d+"/npm/node_modules/"+n+"/package.json","utf8")).version;}catch(e){return x;}return "npm:"+n+"@"+v;});fs.writeFileSync(p,JSON.stringify(s,null,2)+"\n");' \
+    && grep -E '^\s*"npm:pi-(subagents|gstack)@' /root/.pi/agent/settings.json
 
 # 安装 hermes（issue MEM-16）：
 #   --skip-setup   跳过交互式初始化向导（容器内无 tty，原本也会被安装器自动跳过；
