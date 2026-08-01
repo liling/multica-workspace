@@ -93,6 +93,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #                 的 nodejs / npm。hermes 自带独立运行期、不依赖系统 Node，故系统 Node
 #                 升到 24 不影响 hermes；pi / pi 扩展作为 npm 包在 Node 24 上正常运行。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
+#   vim           容器内编辑文本文件，便于调试 / 临时改动（issue MEM-24）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -112,6 +113,7 @@ RUN apt-get update \
         ffmpeg \
         nodejs \
         openssh-client \
+        vim \
     && rm -rf /var/lib/apt/lists/* \
     && node --version \
     && npm --version
