@@ -11,6 +11,17 @@
 #   npm 全局 bin 目录（root 下为 /usr/local/bin/pi），配置/会话/凭据等
 #   数据落在 ~/.pi/agent/（建议通过卷持久化）。
 #
+# 关于 codex（OpenAI Codex CLI，见 issue MEM-25）：
+#   再预装一个 OpenAI 的 Codex CLI 作为可选 agent harness（与 pi / hermes 并列，
+#   均在容器内可直接 `codex` 调用，由任务里的 agent 按需选用）。同样是 npm 包，
+#   通过 `npm install -g @openai/codex` 安装：npm 包本体是个 JS launcher
+#   （bin/codex.js），真正的原生二进制经由 optionalDependencies 按平台拉取
+#   （@openai/codex-linux-x64 / @openai/codex-linux-arm64 均发布），因此 amd64 /
+#   arm64 多架构镜像无需任何 case 分支即可各取所需二进制。命令落在 npm 全局 bin
+#   目录（root 下 /usr/local/bin/codex），配置 / 凭据 / 会话等数据落在 ~/.codex/
+#   （config.toml、auth.json、sessions/，可用 CODEX_HOME 覆盖；建议通过卷持久化）。
+#   包无 postinstall 脚本，故安装不带 --ignore-scripts。
+#
 # 另外补充（见 issue MEM-12）：
 #   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
 #   - 预建 /root/.ssh 目录（权限 700）用于存放 SSH 密钥；该目录应通过卷持久化
@@ -23,6 +34,11 @@
 #   - pi       : `npm install -g @earendil-works/pi-coding-agent`
 #                -> 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），
 #                   配置 / 凭据 / 会话在 ~/.pi/agent/
+#   - codex    : `npm install -g @openai/codex`
+#                -> 命令落在 npm 全局 bin 目录（root 下 /usr/local/bin/codex），
+#                   原生二进制经 optionalDependencies 按平台拉取（amd64/arm64 各自
+#                   命中 @openai/codex-linux-x64 / -linux-arm64），无需架构分支；
+#                   配置 / 凭据 / 会话在 ~/.codex/（CODEX_HOME 可覆盖）。
 #   - hermes   : 官方脚本 https://hermes-agent.nousresearch.com/install.sh
 #                -> root 下命令落在 /usr/local/bin/hermes，
 #                   代码在 /usr/local/lib/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
@@ -49,11 +65,11 @@
 #                刻意不安装 Chrome / Chromium / Playwright Chromium（构建期自检保证）。
 #
 # 说明：
-#   - pi / hermes / multica / pi 扩展四个安装器均拉取“构建当时”的最新版本，
+#   - pi / codex / hermes / multica / pi 扩展五个安装器均拉取“构建当时”的最新版本，
 #     因此每次 `docker build` 会得到当时最新的全部组件（镜像本身不锁定具体版本号）。
-#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 hermes 安装器后加
-#     `--commit <sha>`、在 multica 安装器后加 `--version <ver>`、在 pi 扩展上
-#     加 `@<ver>`（见各自官方文档）。
+#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 codex 的 npm install
+#     上加 `@<ver>`、在 hermes 安装器后加 `--commit <sha>`、在 multica 安装器后加
+#     `--version <ver>`、在 pi 扩展上加 `@<ver>`（见各自官方文档）。
 #   - 相对于原先的 scripts/gstack-install.sh 方案（克隆 gstack、安装 Bun、
 #     拉 Playwright Chromium、把技能注册到 ~/.claude/skills/），现在改走
 #     pi 扩展后不再需要 Bun / Playwright / 任何额外系统层依赖，更轻量且与
@@ -124,6 +140,15 @@ RUN apt-get update \
 #   - 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），已位于默认 PATH；
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+# 安装 codex（OpenAI Codex CLI，见 issue MEM-25）：另一个可选的 agent harness，
+# 与 pi / hermes 并列，任务里的 agent 可按需 `codex` 调用。同样是 npm 包，全局安装
+# 即可：命令落在 /usr/local/bin/codex（已在默认 PATH）；npm 包本体是 JS launcher，
+# 真正的原生 Rust 二进制经由 optionalDependencies 按平台自动拉取（amd64 命中
+# @openai/codex-linux-x64、arm64 命中 @openai/codex-linux-arm64），所以多架构构建
+# 不需要任何 case 分支。包无 postinstall，故不带 --ignore-scripts。engines 要求
+# node >=16，Node 24 满足。配置 / 凭据 / 会话落在 ~/.codex/（建议通过卷持久化）。
+RUN npm install -g @openai/codex
 
 # 安装 pi 扩展（gstack / subagents 适配层，见 issue MEM-18）：
 #   此前 Dockerfile 通过 scripts/gstack-install.sh 克隆 gstack 仓库、装 Bun / Playwright
@@ -211,6 +236,7 @@ RUN mkdir -p /root/.ssh /root/multica_workspaces \
 # 按需安装策略在构建期规避，详见 README「浏览器：Obscura」一节。）
 RUN set -eux; \
     pi --version; \
+    codex --version; \
     hermes --version; \
     multica version; \
     gh --version; \
@@ -221,7 +247,7 @@ RUN set -eux; \
             exit 1; \
         fi; \
     done; \
-    echo "自检通过：pi / hermes / multica / gh / obscura 均可用，且无 Chrome/Chromium。"
+    echo "自检通过：pi / codex / hermes / multica / gh / obscura 均可用，且无 Chrome/Chromium。"
 
 # 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
@@ -238,6 +264,6 @@ WORKDIR /root/multica_workspaces
 #   - 必要时用 MULTICA_TOKEN 固化登录态
 #   - 以容器自身 HOSTNAME 作为 daemon 设备名
 #   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
-# pi / hermes / pi 扩展（pi-subagents、pi-gstack）环境同样在镜像中可用。
+# pi / codex / hermes / pi 扩展（pi-subagents、pi-gstack）环境同样在镜像中可用。
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]
