@@ -81,6 +81,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 #   bash          安装脚本以 #!/usr/bin/env bash 运行
 #   git/curl/tar/xz-utils/ca-certificates  pi/hermes/multica 三个安装器运行所需
 #   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
+#   fd-find        pi 的 find 工具与 tab 自动补全依赖 fd（issue MEM-23：首次启动报
+#                  "fd not found"）。Debian 包名是 fd-find，但为避免与 fdclone 冲突，
+#                  装出的命令叫 fdfind 而非 fd；pi 自动识别 fdfind（tools-manager 的
+#                  systemBinaryNames 含 fdfind），故无需额外建 fd 软链。预装后首次启动
+#                  不再从 GitHub 下载 fd，空卷/离线环境下 pi 的 find 工具也可直接用
+#                  （与上面 ripgrep 同一思路，且二者都是 pi 启动时 ensureTool 的依赖）。
 #   nodejs        pi 要求 Node >= 22.19.0（package.json engines 字段，是「下限」
 #                 而非上限，故 Node 24 同样满足、官方支持）。Debian trixie 默认 nodejs
 #                 较旧（20.x），这里从 NodeSource 的 node_24.x 通道装 Node 24，替换默认
@@ -102,6 +108,7 @@ RUN apt-get update \
         tar \
         xz-utils \
         ripgrep \
+        fd-find \
         ffmpeg \
         nodejs \
         openssh-client \
