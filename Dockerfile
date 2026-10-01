@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# 基于 Debian trixie 官方镜像，安装 pi、hermes、multica 的最新版本，
+# 基于 Debian trixie 官方镜像，安装 pi、multica 的最新版本，
 # 并在容器启动时拉起 multica daemon（前台运行）。
 #
 # 关于 pi（取代 opencode，参考 issue MEM-15）：
@@ -9,17 +9,6 @@
 #   通过 `npm install -g @earendil-works/pi-coding-agent` 安装，命令落在
 #   npm 全局 bin 目录（root 下为 /usr/local/bin/pi），配置/会话/凭据等
 #   数据落在 ~/.pi/agent/（建议通过卷持久化）。
-#
-# 关于 codex（OpenAI Codex CLI，见 issue MEM-25）：
-#   再预装一个 OpenAI 的 Codex CLI 作为可选 agent harness（与 pi / hermes 并列，
-#   均在容器内可直接 `codex` 调用，由任务里的 agent 按需选用）。同样是 npm 包，
-#   通过 `npm install -g @openai/codex` 安装：npm 包本体是个 JS launcher
-#   （bin/codex.js），真正的原生二进制经由 optionalDependencies 按平台拉取
-#   （@openai/codex-linux-x64 / @openai/codex-linux-arm64 均发布），因此 amd64 /
-#   arm64 多架构镜像无需任何 case 分支即可各取所需二进制。命令落在 npm 全局 bin
-#   目录（root 下 /usr/local/bin/codex），配置 / 凭据 / 会话等数据落在 ~/.codex/
-#   （config.toml、auth.json、sessions/，可用 CODEX_HOME 覆盖；建议通过卷持久化）。
-#   包无 postinstall 脚本，故安装不带 --ignore-scripts。
 #
 # 另外补充（见 issue MEM-12）：
 #   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
@@ -33,18 +22,6 @@
 #   - pi       : `npm install -g @earendil-works/pi-coding-agent`
 #                -> 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），
 #                   配置 / 凭据 / 会话在 ~/.pi/agent/
-#   - codex    : `npm install -g @openai/codex`
-#                -> 命令落在 npm 全局 bin 目录（root 下 /usr/local/bin/codex），
-#                   原生二进制经 optionalDependencies 按平台拉取（amd64/arm64 各自
-#                   命中 @openai/codex-linux-x64 / -linux-arm64），无需架构分支；
-#                   配置 / 凭据 / 会话在 ~/.codex/（CODEX_HOME 可覆盖）。
-#   - hermes   : 官方脚本 https://hermes-agent.nousresearch.com/install.sh
-#                -> root 下命令落在 ~/.local/bin/hermes（新版安装器只把该目录写进
-#                   ~/.bashrc / ~/.profile 的 PATH，容器内非交互 shell 不读 rc 文件，
-#                   故需下方 ENV PATH 显式注入），
-#                   代码在 $HERMES_HOME/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
-#                   构建时加 --skip-setup --skip-browser（issue MEM-16），
-#                   跳过 setup 向导与 Playwright/Chromium 下载以省流量。
 #   - multica  : 官方脚本 https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh
 #                -> root 下命令落在 /usr/local/bin/multica（已位于默认 PATH）
 #   - gh      : GitHub 官方 apt 仓库 https://cli.github.com/packages（GitHub CLI）
@@ -58,14 +35,10 @@
 #                刻意不安装 Chrome / Chromium / Playwright Chromium（构建期自检保证）。
 #
 # 说明：
-#   - pi / codex / hermes / multica 四个安装器均拉取“构建当时”的最新版本，
+#   - pi / multica 两个安装器均拉取“构建当时”的最新版本，
 #     因此每次 `docker build` 会得到当时最新的全部组件（镜像本身不锁定具体版本号）。
-#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 codex 的 npm install 上加
-#     `@<ver>`、在 hermes 安装器后加 `--commit <sha>`、在 multica 安装器后加
+#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 multica 安装器后加
 #     `--version <ver>`（见各自官方文档）。
-#   - hermes 安装器默认只修改 ~/.bashrc 的 PATH；容器内的非交互 shell
-#     并不读取 .bashrc，因此这里用 ENV PATH 显式注入，确保
-#     `docker run --rm <img> hermes` / `multica` 直接可用。
 #   - multica 安装器与 npm 全局安装默认将二进制放入 /usr/local/bin（root 可写，
 #     已位于默认 PATH），故无需额外修改 PATH。
 #   - 镜像以 root 用户运行（与各安装器的默认布局一致）。
@@ -83,19 +56,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # 基础依赖：
 #   bash          安装脚本以 #!/usr/bin/env bash 运行
-#   git/curl/tar/xz-utils/ca-certificates  pi/hermes/multica 三个安装器运行所需
-#   ripgrep/ffmpeg  hermes 的文件检索与 TTS 语音功能依赖，预装以避免构建期临时 apt
+#   git/curl/tar/xz-utils/ca-certificates  pi / multica 两个安装器运行所需
+#   ripgrep       pi 的 find 工具与 tab 自动补全依赖 rg（与 fd-find 同一思路：预装避免
+#                 空卷/离线环境首次启动时从 GitHub 下载，确保 pi 启动时 ensureTool 一步到位）。
 #   fd-find        pi 的 find 工具与 tab 自动补全依赖 fd（issue MEM-23：首次启动报
 #                  "fd not found"）。Debian 包名是 fd-find，但为避免与 fdclone 冲突，
 #                  装出的命令叫 fdfind 而非 fd；pi 自动识别 fdfind（tools-manager 的
 #                  systemBinaryNames 含 fdfind），故无需额外建 fd 软链。预装后首次启动
-#                  不再从 GitHub 下载 fd，空卷/离线环境下 pi 的 find 工具也可直接用
-#                  （与上面 ripgrep 同一思路，且二者都是 pi 启动时 ensureTool 的依赖）。
+#                  不再从 GitHub 下载 fd，空卷/离线环境下 pi 的 find 工具也可直接用。
 #   nodejs        pi 要求 Node >= 22.19.0（package.json engines 字段，是「下限」
 #                 而非上限，故 Node 24 同样满足、官方支持）。Debian trixie 默认 nodejs
 #                 较旧（20.x），这里从 NodeSource 的 node_24.x 通道装 Node 24，替换默认
-#                 的 nodejs / npm。hermes 自带独立运行期、不依赖系统 Node，故系统 Node
-#                 升到 24 不影响 hermes；pi 作为 npm 包在 Node 24 上正常运行。
+#                 的 nodejs / npm。pi 作为 npm 包在 Node 24 上正常运行。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
 #   vim           容器内编辑文本文件，便于调试 / 临时改动（issue MEM-24）
 RUN apt-get update \
@@ -114,7 +86,6 @@ RUN apt-get update \
         xz-utils \
         ripgrep \
         fd-find \
-        ffmpeg \
         nodejs \
         openssh-client \
         vim \
@@ -128,24 +99,6 @@ RUN apt-get update \
 #   - 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），已位于默认 PATH；
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-
-# 安装 codex（OpenAI Codex CLI，见 issue MEM-25）：另一个可选的 agent harness，
-# 与 pi / hermes 并列，任务里的 agent 可按需 `codex` 调用。同样是 npm 包，全局安装
-# 即可：命令落在 /usr/local/bin/codex（已在默认 PATH）；npm 包本体是 JS launcher，
-# 真正的原生 Rust 二进制经由 optionalDependencies 按平台自动拉取（amd64 命中
-# @openai/codex-linux-x64、arm64 命中 @openai/codex-linux-arm64），所以多架构构建
-# 不需要任何 case 分支。包无 postinstall，故不带 --ignore-scripts。engines 要求
-# node >=16，Node 24 满足。配置 / 凭据 / 会话落在 ~/.codex/（建议通过卷持久化）。
-RUN npm install -g @openai/codex
-
-# 安装 hermes（issue MEM-16）：
-#   --skip-setup   跳过交互式初始化向导（容器内无 tty，原本也会被安装器自动跳过；
-#                   这里显式带上更清晰，也防止未来安装器探测逻辑变化）
-#   --skip-browser 跳过 Playwright/Chromium 下载（节省构建期网络流量与磁盘空间；
-#                   代价是镜像里 hermes 的 browser tools 不可用，如需可在运行期手动：
-#                   cd $INSTALL_DIR && npx playwright install chromium）
-# 安装器自行用 uv 拉取 Python 3.11 / Node 22 并安装依赖。
-RUN curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser
 
 # 安装 multica CLI（官方脚本，默认仅安装 CLI，不附带 self-host server；
 # 二进制落在 /usr/local/bin/multica，已位于默认 PATH）
@@ -189,12 +142,7 @@ RUN set -eux; \
     rm -rf /tmp/obscura-extract /tmp/obscura.tar.gz; \
     obscura --version
 
-# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh / obscura 已在默认 PATH 上）。
-# hermes 命令在 ~/.local/bin/（见上方安装方式说明）：安装器只改 ~/.bashrc / ~/.profile
-# 的 PATH，容器内的非交互 shell 并不读取这些 rc 文件，因此这里用 ENV PATH 显式注入，
-# 确保构建期自检与 `docker run --rm <img> hermes` 都能直接找到 hermes。
-ENV HERMES_HOME=/root/.hermes \
-    PATH="/root/.local/bin:${PATH}"
+# 自检阶段前没有任何额外 ENV；pi / multica / gh / obscura 的二进制均落在默认 PATH 上。
 
 # 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
 #   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
@@ -207,13 +155,11 @@ RUN mkdir -p /root/.ssh /root/multica_workspaces \
 # 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）。
 # 同时保证「镜像里没有 Chrome / Chromium」：本镜像以 Obscura 作为唯一浏览器引擎
 # （见上方 Obscura 安装步骤），任何 chrome/chromium 二进制出现在 PATH 上都视为
-# 构建异常并中止，防止后续改动把 Chromium 偷偷带回来。（注：Playwright 缓存
-# ~/.cache/ms-playwright/ 不在 PATH 上，由 hermes --skip-browser 在构建期规避，
-# 详见 README「浏览器：Obscura」一节。）
+# 构建异常并中止，防止后续改动把 Chromium 偷偷带回来。
+# 此外显式拒绝 ffmpeg 回归：本镜像不再需要 ffmpeg（原仅 hermes TTS 用），一旦
+# 后续改动把 ffmpeg 偷偷带回来，此断言立即失败。
 RUN set -eux; \
     pi --version; \
-    codex --version; \
-    hermes --version; \
     multica version; \
     gh --version; \
     obscura --version; \
@@ -223,7 +169,11 @@ RUN set -eux; \
             exit 1; \
         fi; \
     done; \
-    echo "自检通过：pi / codex / hermes / multica / gh / obscura 均可用，且无 Chrome/Chromium。"
+    if command -v ffmpeg >/dev/null 2>&1; then \
+        echo "错误：检测到 ffmpeg。本镜像不再预装 hermes，ffmpeg 失去用途，不应存在。"; \
+        exit 1; \
+    fi; \
+    echo "自检通过：pi / multica / gh / obscura 均可用，且无 Chrome/Chromium / ffmpeg。"
 
 # 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
@@ -240,6 +190,6 @@ WORKDIR /root/multica_workspaces
 #   - 必要时用 MULTICA_TOKEN 固化登录态
 #   - 以容器自身 HOSTNAME 作为 daemon 设备名
 #   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
-# pi / codex / hermes 环境同样在镜像中可用。
+# pi 环境同样在镜像中可用（与 multica daemon 并列）。
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]
