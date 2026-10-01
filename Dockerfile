@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 #
 # 基于 Debian trixie 官方镜像，安装 pi、hermes、multica 的最新版本，
-# 以及 pi 扩展形式的 gstack / subagents 适配层，
 # 并在容器启动时拉起 multica daemon（前台运行）。
 #
 # 关于 pi（取代 opencode，参考 issue MEM-15）：
@@ -46,14 +45,6 @@
 #                   跳过 setup 向导与 Playwright/Chromium 下载以省流量。
 #   - multica  : 官方脚本 https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh
 #                -> root 下命令落在 /usr/local/bin/multica（已位于默认 PATH）
-#   - pi 扩展 : 通过 pi CLI 安装 npm 包形式的 gstack / subagents 适配层（见 issue MEM-18）：
-#                pi install npm:pi-subagents  -> pi 原生子智能体委托扩展
-#                pi install npm:pi-gstack      -> 把 Garry Tan 的 gstack 技能与工作流
-#                                                以 pi 扩展形式适配进 pi（运行时按需
-#                                                拉取上游 gstack 仓库，并注册为
-#                                                /gstack-* 命名空间技能）。
-#                两包都落到 ~/.pi/agent/ 下（npm 包目录 + settings.json 条目），
-#                镜像默认通过卷持久化 /root/.pi/agent（见 README）。
 #   - gh      : GitHub 官方 apt 仓库 https://cli.github.com/packages（GitHub CLI）
 #                -> root 下命令落在 /usr/local/bin/gh，已位于默认 PATH
 #   - obscura : Rust 写的无头浏览器引擎（https://github.com/h4ckf0r0day/obscura），
@@ -65,16 +56,11 @@
 #                刻意不安装 Chrome / Chromium / Playwright Chromium（构建期自检保证）。
 #
 # 说明：
-#   - pi / codex / hermes / multica / pi 扩展五个安装器均拉取“构建当时”的最新版本，
+#   - pi / codex / hermes / multica 四个安装器均拉取“构建当时”的最新版本，
 #     因此每次 `docker build` 会得到当时最新的全部组件（镜像本身不锁定具体版本号）。
-#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 codex 的 npm install
-#     上加 `@<ver>`、在 hermes 安装器后加 `--commit <sha>`、在 multica 安装器后加
-#     `--version <ver>`、在 pi 扩展上加 `@<ver>`（见各自官方文档）。
-#   - 相对于原先的 scripts/gstack-install.sh 方案（克隆 gstack、安装 Bun、
-#     拉 Playwright Chromium、把技能注册到 ~/.claude/skills/），现在改走
-#     pi 扩展后不再需要 Bun / Playwright / 任何额外系统层依赖，更轻量且与
-#     pi 生态对齐。pi-gstack 在首次 `/gstack-build` 时按需编译 gstack
-#     的 browse 二进制及安装 Playwright Chromium（非镜像构建期）。
+#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 codex 的 npm install 上加
+#     `@<ver>`、在 hermes 安装器后加 `--commit <sha>`、在 multica 安装器后加
+#     `--version <ver>`（见各自官方文档）。
 #   - hermes 安装器默认只修改 ~/.bashrc 的 PATH；容器内的非交互 shell
 #     并不读取 .bashrc，因此这里用 ENV PATH 显式注入，确保
 #     `docker run --rm <img> hermes` / `multica` 直接可用。
@@ -107,7 +93,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 #                 而非上限，故 Node 24 同样满足、官方支持）。Debian trixie 默认 nodejs
 #                 较旧（20.x），这里从 NodeSource 的 node_24.x 通道装 Node 24，替换默认
 #                 的 nodejs / npm。hermes 自带独立运行期、不依赖系统 Node，故系统 Node
-#                 升到 24 不影响 hermes；pi / pi 扩展作为 npm 包在 Node 24 上正常运行。
+#                 升到 24 不影响 hermes；pi 作为 npm 包在 Node 24 上正常运行。
 #   openssh-client  便于容器内通过 SSH 拉取仓库 / 跑 git+ssh（issue MEM-12）
 #   vim           容器内编辑文本文件，便于调试 / 临时改动（issue MEM-24）
 RUN apt-get update \
@@ -149,33 +135,6 @@ RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 # 不需要任何 case 分支。包无 postinstall，故不带 --ignore-scripts。engines 要求
 # node >=16，Node 24 满足。配置 / 凭据 / 会话落在 ~/.codex/（建议通过卷持久化）。
 RUN npm install -g @openai/codex
-
-# 安装 pi 扩展（gstack / subagents 适配层，见 issue MEM-18）：
-#   此前 Dockerfile 通过 scripts/gstack-install.sh 克隆 gstack 仓库、装 Bun / Playwright
-#   Chromium 并把技能注册到 ~/.claude/skills/，镜像很大且与 pi 生态脱节。这里改为直接
-#   通过 pi 把这两个 npm 扩展装进 ~/.pi/agent/，省掉 Bun / Playwright 等系统依赖：
-#     - pi install npm:pi-subagents  提供 pi 原生子智能体委托（reviewer / scout / oracle 等）
-#     - pi install npm:pi-gstack      把 Garry Tan 的 gstack 技能与工作流以 pi 扩展形式
-#                                       适配进 pi；首次 /gstack-build 时按需拉上游仓库、
-#                                       编译 browse 二进制、装 Playwright Chromium。
-#   每条 pi install 只 write settings.json + 下载一个 npm 包到 ~/.pi/agent/npm/，
-#   不引入任何 postinstall 之外的额外系统依赖。失败立即暴露（构建失败即报错）。
-#   额外一步（issue MEM-26）：装完后把这两个扩展在 settings.json 里的 source 固定为
-#   「构建当时」的确切版本（npm:pi-subagents@<ver> / npm:pi-gstack@<ver>）。pi 的交互式
-#   启动会拿 settings.json 里的 source 与 npm registry 最新版比较、不一致就弹
-#   「Package Updates Available / Run pi update --extensions」提示（见 pi 源码
-#   interactive-mode.checkForPackageUpdates → package-manager.checkForAvailableUpdates：
-#   命中 PI_OFFLINE 或 source 为带确切版本的 pinned spec 时跳过）。容器里这条提示既
-#   无用又误导——它建议的 `pi update --extensions` 在容器内执行后会随容器重建而丢失，
-#   正确的升级方式是重建镜像。带确切版本的 source 会被 pi 判定为 pinned 从而跳过该
-#   检查（packages.md：「Versioned specs are pinned and skipped by package updates」），
-#   运行期不再弹提示；而每次重建镜像仍拉取当时的最新版，仍满足「镜像不锁定版本号、
-#   构建当时最新」的整体策略。注：因 /root/.pi/agent 以卷持久化，此 pinning 只对「空卷
-#   首启」生效；旧卷里残留的未固定 settings.json 需删掉对应条目让 pi 重写，或手动改。
-RUN pi install npm:pi-subagents \
-    && pi install npm:pi-gstack \
-    && node -e 'const fs=require("fs");const d="/root/.pi/agent";const p=d+"/settings.json";const s=JSON.parse(fs.readFileSync(p,"utf8"));s.packages=s.packages.map(function(x){const m=/^npm:(.+)$/.exec(x);if(!m)return x;const n=m[1];let v;try{v=JSON.parse(fs.readFileSync(d+"/npm/node_modules/"+n+"/package.json","utf8")).version;}catch(e){return x;}return "npm:"+n+"@"+v;});fs.writeFileSync(p,JSON.stringify(s,null,2)+"\n");' \
-    && grep -E '^\s*"npm:pi-(subagents|gstack)@' /root/.pi/agent/settings.json
 
 # 安装 hermes（issue MEM-16）：
 #   --skip-setup   跳过交互式初始化向导（容器内无 tty，原本也会被安装器自动跳过；
@@ -236,18 +195,15 @@ ENV HERMES_HOME=/root/.hermes
 #     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
 #   - /root/multica_workspaces 作为容器默认工作目录（WORKDIR），与 daemon 任务
 #     工作区基目录一致（运行期由 agent-workspaces 卷覆盖）。
-# pi 扩展（pi-subagents / pi-gstack）数据落在 ~/.pi/agent/，由上面卷映射持久化。
 RUN mkdir -p /root/.ssh /root/multica_workspaces \
     && chmod 700 /root/.ssh
 
 # 构建期自检：确保各二进制都真的可用（构建失败即暴露安装问题）。
-# pi 扩展不强制自检：它们在首次 `pi` 启动时才加载，构建期未启动 pi 会话时
-# 静默运行也无意义；如果扩展有问题会在第一次使用时立刻报错。
 # 同时保证「镜像里没有 Chrome / Chromium」：本镜像以 Obscura 作为唯一浏览器引擎
 # （见上方 Obscura 安装步骤），任何 chrome/chromium 二进制出现在 PATH 上都视为
 # 构建异常并中止，防止后续改动把 Chromium 偷偷带回来。（注：Playwright 缓存
-# ~/.cache/ms-playwright/ 不在 PATH 上，由 hermes --skip-browser 与 pi-gstack 的
-# 按需安装策略在构建期规避，详见 README「浏览器：Obscura」一节。）
+# ~/.cache/ms-playwright/ 不在 PATH 上，由 hermes --skip-browser 在构建期规避，
+# 详见 README「浏览器：Obscura」一节。）
 RUN set -eux; \
     pi --version; \
     codex --version; \
@@ -278,6 +234,6 @@ WORKDIR /root/multica_workspaces
 #   - 必要时用 MULTICA_TOKEN 固化登录态
 #   - 以容器自身 HOSTNAME 作为 daemon 设备名
 #   - exec 让 daemon 成为 PID 1，确保能正确接收 docker stop 等信号
-# pi / codex / hermes / pi 扩展（pi-subagents、pi-gstack）环境同样在镜像中可用。
+# pi / codex / hermes 环境同样在镜像中可用。
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]

@@ -2,7 +2,7 @@
 
 在容器中运行 Multica 智能体（agent daemon）的镜像。
 
-本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi**、**codex**（OpenAI Codex CLI）、**hermes**、**multica** 四个 CLI，并通过 `pi install npm:pi-subagents` / `pi install npm:pi-gstack` 把 Garry Tan 的 **gstack**（Claude Code 风格技能集）以 pi 扩展形式适配进 pi（命名空间 `/gstack-*`），同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi**、**codex**（OpenAI Codex CLI）、**hermes**、**multica** 四个 CLI，同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
 
 其中 **pi / codex / hermes** 三个都是可用的「编程 agent harness」：任务里的 agent 可按需选用任意一个（`pi` / `codex` / `hermes`）来执行编码、审查等子任务；`multica daemon` 仍是容器的 PID 1，负责领取与调度平台任务。
 
@@ -91,7 +91,7 @@ volumes:
 > **为什么用 `env_file` 而不是直接在 `environment:` 里写 `MULTICA_TOKEN: ${MULTICA_TOKEN:?...}`？**
 > 两种方式都行。但后者依赖“运行 `docker compose` 的 shell 自己已经 `export` 了 `MULTICA_TOKEN`”，容易因为变量没导出、或在别处执行而拿到空值，进而触发 `not authenticated`。用同目录的 `.env` + `env_file` 最省心、首次启动即可用。
 
-> **关于 pi 的配置目录**：pi 把配置、凭据、会话、扩展等数据集中存放在 `~/.pi/agent/` 目录下，
+> **关于 pi 的配置目录**：pi 把配置、凭据、会话等数据集中存放在 `~/.pi/agent/` 目录下，
 > 其中最关键的是该目录下的 `auth.json`（保存各 provider 的登录凭据）。建议把 `/root/.pi/agent`
 > 通过卷持久化（见 compose 示例），否则容器重建后 pi 会丢失登录、需要重新 `/login`。
 > 与 opencode 不同，pi 不需要分散挂载 XDG 多处——单个卷即可覆盖全部状态。
@@ -142,7 +142,7 @@ daemon 主要通过环境变量配置。常用项：
 |---|---|
 | `/root/.multica` | multica daemon 身份（`daemon.id`）、CLI 配置 |
 | `/root/.hermes` | hermes 数据目录（`HERMES_HOME`） |
-| `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话 / 扩展等全部状态（**最关键，勿丢**） |
+| `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话等全部状态（**最关键，勿丢**） |
 | `/root/.codex` | codex 配置 `config.toml` / 凭据 `auth.json` / 会话（可用 `CODEX_HOME` 覆盖） |
 | `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
 | `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
@@ -213,7 +213,6 @@ obscura mcp --http --port 8080       # endpoint: http://127.0.0.1:8080/mcp
 镜像**构建期**不安装任何 Chromium。需要注意的唯一运行期路径：
 
 - **hermes**：构建时已加 `--skip-browser`，不会下载 Playwright/Chromium（其 browser tools 默认不可用；如需让 hermes 走 Obscura，可参考社区插件 [hermes-plugin-obscura](https://github.com/SGavrl/hermes-plugin-obscura)，由它按会话起 `obscura serve` 并通过 CDP 驱动）。
-- **pi-gstack**：扩展本体不下载 Chromium，但其 `/gstack-build` 在**首次构建** gstack 的 browse 二进制时会**按需**安装 Playwright Chromium 到 `~/.cache/ms-playwright/`（运行期行为，非镜像层）。如果你希望连这条路径也彻底走 Obscura、完全不引入 Chromium，**不要运行 `/gstack-build`**，浏览统一用 `obscura` 命令；或运行后手动 `rm -rf ~/.cache/ms-playwright`。
 
 ---
 
