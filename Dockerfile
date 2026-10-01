@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# 基于 Debian trixie 官方镜像，安装 pi、multica 的最新版本，
+# 基于 Debian trixie 官方镜像，安装 pi 与由构建参数指定版本的 multica，
 # 并在容器启动时拉起 multica daemon（前台运行）。
 #
 # 关于 pi（取代 opencode，参考 issue MEM-15）：
@@ -35,10 +35,9 @@
 #                刻意不安装 Chrome / Chromium / Playwright Chromium（构建期自检保证）。
 #
 # 说明：
-#   - pi / multica 两个安装器均拉取“构建当时”的最新版本，
-#     因此每次 `docker build` 会得到当时最新的全部组件（镜像本身不锁定具体版本号）。
-#     若需锁定版本，可在 pi 的 npm install 上加 `@<ver>`、在 multica 安装器后加
-#     `--version <ver>`（见各自官方文档）。
+#   - CI 从 upstream 最新稳定 release 解析 MULTICA_VERSION，作为 build arg 传入；
+#     本地构建须显式传入同一参数。版本变化才会使 multica 安装层失效。
+#     pi 等未 pin 的组件仍可能命中 BuildKit 缓存，并非每次构建都会更新。
 #   - multica 安装器与 npm 全局安装默认将二进制放入 /usr/local/bin（root 可写，
 #     已位于默认 PATH），故无需额外修改 PATH。
 #   - 镜像以 root 用户运行（与各安装器的默认布局一致）。
@@ -100,9 +99,29 @@ RUN apt-get update \
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
-# 安装 multica CLI（官方脚本，默认仅安装 CLI，不附带 self-host server；
-# 二进制落在 /usr/local/bin/multica，已位于默认 PATH）
-RUN curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+# upstream install.sh 不支持 --version：直接取指定 release 的官方 CLI 归档。
+# ARG 紧邻安装层；版本变化时 cache key 改变，未变化时保留其它层缓存。
+# 用 RUN 内的版本比对阻止下载到错误二进制后推送镜像。
+ARG MULTICA_VERSION
+RUN set -eu; \
+    : "${MULTICA_VERSION:?must pass MULTICA_VERSION (e.g. v0.6.1)}"; \
+    case "$MULTICA_VERSION" in \
+        v[0-9]*.[0-9]*.[0-9]*) ;; \
+        *) echo "Invalid MULTICA_VERSION: $MULTICA_VERSION" >&2; exit 1 ;; \
+    esac; \
+    case "$(dpkg --print-architecture)" in \
+        amd64|arm64) MULTICA_ARCH="$(dpkg --print-architecture)" ;; \
+        *) echo "Unsupported Multica architecture" >&2; exit 1 ;; \
+    esac; \
+    version="${MULTICA_VERSION#v}"; \
+    echo "Installing Multica CLI target: ${MULTICA_VERSION} (linux/${MULTICA_ARCH})"; \
+    curl -fsSL "https://github.com/multica-ai/multica/releases/download/${MULTICA_VERSION}/multica-cli-${version}-linux-${MULTICA_ARCH}.tar.gz" -o /tmp/multica.tar.gz; \
+    tar -xzf /tmp/multica.tar.gz -C /usr/local/bin multica; \
+    chmod 0755 /usr/local/bin/multica; \
+    rm /tmp/multica.tar.gz; \
+    actual="$(multica version)"; \
+    echo "Multica CLI target: ${MULTICA_VERSION}; installed: ${actual}"; \
+    [ "$(printf '%s\n' "$actual" | awk 'NR==1 {print $1 " " $2}')" = "multica ${version}" ]
 
 # 安装 GitHub CLI（gh）——官方 apt 仓库（cli.github.com）。
 # 便于在容器内直接操作 GitHub（PR / issue / workflow 等）。

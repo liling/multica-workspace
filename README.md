@@ -207,6 +207,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        MULTICA_VERSION: v0.6.1 # 构建前请查询 upstream 最新稳定 release 并更新此值
     # ...其余同上
 ```
 
@@ -219,7 +221,7 @@ docker compose up -d --build
 或直接用 docker：
 
 ```bash
-docker build -t multica-workspace:local .
+docker build --build-arg MULTICA_VERSION=v0.6.1 -t multica-workspace:local .
 docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   --env-file .env \
   -v multica-state:/root/.multica \
@@ -229,7 +231,13 @@ docker run -d --name multica-agent-01 --hostname multica-agent-01 \
   multica-workspace:local
 ```
 
-> 每次 `docker build` 会拉取当时最新的 pi / multica；镜像本身不锁定版本号（如需锁定见 `Dockerfile` 顶部注释）。镜像支持 `linux/amd64` 与 `linux/arm64`。
+> `MULTICA_VERSION` 必填，须使用 upstream 稳定 release tag（如 `v0.6.1`）；本地示例版本仅供演示，使用前请查询最新版本。镜像支持 `linux/amd64` 与 `linux/arm64`。
+
+## Multica CLI 版本与构建缓存
+
+CI 每次运行先从 `multica-ai/multica` 的 GitHub latest release API 读取稳定 tag，作为 `MULTICA_VERSION` 传入 Dockerfile。安装层直接下载该 tag 对应的官方 `linux/amd64` 或 `linux/arm64` CLI 归档，并将 `multica version` 与目标版本比较；不一致则构建失败。upstream `install.sh` 当前只解析 latest，**不支持 `--version` pin**，因此不用于此处。
+
+之前 Dockerfile 使用 `curl .../install.sh | bash`，但 BuildKit/GHA cache 在指令及前序输入不变时复用安装层，安装器根本不运行；不是安装器不会更新。现在版本是安装层的显式 cache key 输入：新 release 触发重建，版本不变时仍复用缓存。未 pin 的 pi 等其它层同样可能命中缓存，不能保证每次构建更新。main push 更新 `:latest`；PR 分支可通过 Actions 手动运行 `Build and Push Docker Image`，只推 commit SHA tag，不覆盖 `:latest`。合并 main 且对应 Actions 成功后，`:latest` 才更新。
 
 ---
 

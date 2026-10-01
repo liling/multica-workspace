@@ -1,7 +1,7 @@
 name: Build and Push Docker Image
 
-# 在推送到默认分支（main）时，构建多架构镜像并推送到 GitHub Container Registry (GHCR)，
-# 推送 latest 浮动 tag 以及按 commit 短 sha 的不可变 tag，最后清理老版本。
+# main 推送 latest 与 commit SHA tag；手动 dispatch 可在 PR 分支验证多架构构建，
+# 只推 SHA tag，不覆盖生产 latest。最后仅在 main 构建后清理老版本。
 #
 # 历史注记：早期只用 :latest 浮动 tag，曾在此处加过 actions/delete-package-versions
 # 的 prune 步骤（min-versions-to-keep: 3）。该步骤在多架构 + SLSA attestation 场景下
@@ -44,6 +44,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 在 runner 上每次解析最新稳定 release；API 失败、tag 格式异常立即失败，
+      # 不回退到旧版本。此值是 multica 安装层的 cache key 输入。
+      - name: Resolve Multica CLI release
+        id: multica
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag=$(gh api repos/multica-ai/multica/releases/latest --jq '.tag_name')
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid stable release tag: $tag" >&2; exit 1; }
+          echo "Target Multica CLI release: $tag"
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v7
         with:
@@ -51,15 +64,14 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          # :latest 浮动 + 不可变 short-sha tag，并行见 MEM-17。
+          # 仅 main 更新 latest；分支手动验证推 SHA tag，避免抢占正式 latest。
           tags: |
-            ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
-          # 复用 BuildKit 在 GitHub Actions 上的缓存后端（MEM-9）：
-          # 未改动的层（apt 基础依赖、pi / multica 安装等）直接从缓存命中，
-          # 只重跑真正变化的部分，把“小调整也要十几分钟”压缩到几分钟以内。
-          # mode=max 缓存全部中间层，最大化命中率；缓存受 GitHub 7 天 TTL 约束，
-          # 到期或改了 Dockerfile 后会自动重新拉取各 CLI 的最新版本。
+            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/{0}:latest', github.repository) || '' }}
+          build-args: |
+            MULTICA_VERSION=${{ steps.multica.outputs.version }}
+          # 保留 BuildKit/GHA 缓存；multica 版本变化使安装层及下游层失效，
+          # 其余昂贵层仍可复用。未变化时允许命中缓存，并非每次重装。
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -75,6 +87,7 @@ jobs:
       # —— GHCR 上根本没这条路径，永远 404，run 都失败。
       # 这里显式抽出 basename，并按 owner 是 user 还是 org 二选一 endpoint。
       - name: Prune old GHCR package versions
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
