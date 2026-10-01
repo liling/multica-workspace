@@ -39,8 +39,10 @@
 #                   命中 @openai/codex-linux-x64 / -linux-arm64），无需架构分支；
 #                   配置 / 凭据 / 会话在 ~/.codex/（CODEX_HOME 可覆盖）。
 #   - hermes   : 官方脚本 https://hermes-agent.nousresearch.com/install.sh
-#                -> root 下命令落在 /usr/local/bin/hermes，
-#                   代码在 /usr/local/lib/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
+#                -> root 下命令落在 ~/.local/bin/hermes（新版安装器只把该目录写进
+#                   ~/.bashrc / ~/.profile 的 PATH，容器内非交互 shell 不读 rc 文件，
+#                   故需下方 ENV PATH 显式注入），
+#                   代码在 $HERMES_HOME/hermes-agent，数据在 $HERMES_HOME(/root/.hermes)
 #                   构建时加 --skip-setup --skip-browser（issue MEM-16），
 #                   跳过 setup 向导与 Playwright/Chromium 下载以省流量。
 #   - multica  : 官方脚本 https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh
@@ -187,8 +189,12 @@ RUN set -eux; \
     rm -rf /tmp/obscura-extract /tmp/obscura.tar.gz; \
     obscura --version
 
-# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh / obscura 已在默认 PATH 上）
-ENV HERMES_HOME=/root/.hermes
+# 让 hermes 数据目录在任意 shell 下都可被定位（pi / multica / gh / obscura 已在默认 PATH 上）。
+# hermes 命令在 ~/.local/bin/（见上方安装方式说明）：安装器只改 ~/.bashrc / ~/.profile
+# 的 PATH，容器内的非交互 shell 并不读取这些 rc 文件，因此这里用 ENV PATH 显式注入，
+# 确保构建期自检与 `docker run --rm <img> hermes` 都能直接找到 hermes。
+ENV HERMES_HOME=/root/.hermes \
+    PATH="/root/.local/bin:${PATH}"
 
 # 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
 #   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
