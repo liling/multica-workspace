@@ -31,6 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Test image contract and supervisor lifecycle
+        run: |
+          bash tests/image-contract.sh
+
       - name: Set up QEMU (multi-arch emulation)
         uses: docker/setup-qemu-action@v4
 
@@ -74,6 +78,9 @@ jobs:
           # 其余昂贵层仍可复用。未变化时允许命中缓存，并非每次重装。
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify pushed image runtime contract
+        run: bash tests/container-smoke.sh "ghcr.io/${{ github.repository }}:${{ github.sha }}"
 
       # 参照 liling/hindsight 的 build-custom.yml 做老版本回收。
       # 关键护栏：对每个候选 version，先查它身上的 tags 列表，
