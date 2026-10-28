@@ -31,6 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Test image contract and supervisor lifecycle
+        run: |
+          bash tests/image-contract.sh
+
       - name: Set up QEMU (multi-arch emulation)
         uses: docker/setup-qemu-action@v4
 

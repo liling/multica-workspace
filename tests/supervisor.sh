@@ -41,6 +41,8 @@ start_supervisor() {
   export HOSTNAME=test
   "$root/entrypoint.sh" --no-auto-update &
   supervisor_pid=$!
+  actual_uid=$(ps -o uid= -p "$supervisor_pid" | tr -d ' ')
+  [[ "$actual_uid" == "$(id -u)" && "$actual_uid" != 0 ]]
 }
 wait_status() {
   local expected=$1 timeout=${2:-12}

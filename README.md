@@ -18,15 +18,15 @@ SIGTERM（`docker stop`）会转发到 daemon 并清理 PID 文件。调试可�
 
 ## 启动
 
-注入 `MULTICA_TOKEN`，并建议持久化 `/root/.multica`、`/root/.pi/agent`、`/root/multica_workspaces` 与 `/root/.ssh`：
+镜像默认以 `multica`（UID/GID 1000）运行，HOME 和工作目录分别为 `/home/multica` 与 `/home/multica/multica_workspaces`。注入 `MULTICA_TOKEN`，并持久化 `/home/multica/.multica`、`/home/multica/.pi/agent`、`/home/multica/multica_workspaces` 与 `/home/multica/.ssh`：
 
 ```sh
 docker run -d --name multica-agent --hostname multica-agent \
   -e MULTICA_TOKEN="$MULTICA_TOKEN" \
-  -v multica-state:/root/.multica \
-  -v pi-agent:/root/.pi/agent \
-  -v agent-workspaces:/root/multica_workspaces \
-  -v ssh-keys:/root/.ssh \
+  -v multica-state:/home/multica/.multica \
+  -v pi-agent:/home/multica/.pi/agent \
+  -v agent-workspaces:/home/multica/multica_workspaces \
+  -v ssh-keys:/home/multica/.ssh \
   ghcr.io/liling/multica-workspace:latest
 ```
 
@@ -38,19 +38,19 @@ Docker CLI 仅用于连接宿主机 Docker；不应在容器内启动 Docker dae
 -v /var/run/docker.sock:/var/run/docker.sock
 ```
 
-警告：Docker socket 基本等同宿主机 root 权限；只对可信工作负载挂载，并避免暴露给不可信 agent/task。
+显式挂载时，按宿主机 socket 的 GID 为容器增加 supplementary group，例如 `--group-add <socket-gid>`。Docker socket 基本等同宿主机 root 权限；只对可信工作负载挂载，并避免暴露给不可信 agent/task。镜像不预设 docker group，也不修改 socket 权限。
+
+## Breaking migration 与权限风险
+
+此版本将运行用户从 root 改为 UID/GID 1000 的 `multica`，属于 breaking migration。旧容器将卷挂载到 `/root/.multica`、`/root/.pi/agent`、`/root/.ssh` 或 `/root/multica_workspaces` 时，必须把挂载目标改为对应的 `/home/multica/...` 路径；迁移现有数据时请在宿主机备份并调整卷所有权为 UID/GID 1000。镜像不会在 `/root` 建立可写兼容回退。
+
+`multica` 可使用 `/etc/sudoers.d/multica` 中配置的免密码 `sudo`。默认启动进程仍是 UID 1000，但容器内用户可随时取得 root；因此非 root 默认运行可降低意外 root 进程风险，不构成强权限隔离。不要将其视为对抗容器内不可信代码的安全边界。
 
 ## 构建与测试
 
 ```sh
-docker build --build-arg MULTICA_VERSION=v0.6.1 -t multica-workspace:local .
 bash tests/supervisor.sh
+bash tests/image-contract.sh
 ```
 
-跨架构复现（需 Docker Buildx 与可用的 QEMU/binfmt）：
-
-```sh
-docker buildx build --platform linux/amd64,linux/arm64 --build-arg MULTICA_VERSION=v0.6.1 --tag multica-workspace:check --load .
-```
-
-若本机不能执行两种架构，可通过注册 QEMU 后在支持 Buildx 的 Linux 主机执行；两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建期逐项校验可执行入口。不能用 `--load` 加载多平台镜像时，移除 `--load` 并使用 `--push` 推至临时 registry。
+项目正式验收由 GitHub Actions 执行 amd64/arm64 构建。不要在本地执行 Docker build 作为验收证据。两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建阶段会校验 CLI、sudo 权限及目录属主/权限。

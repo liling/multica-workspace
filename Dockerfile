@@ -12,9 +12,9 @@
 #
 # 另外补充（见 issue MEM-12）：
 #   - 预装 openssh-client，便于容器内通过 SSH 拉取仓库 / 跑 git+ssh。
-#   - 预建 /root/.ssh 目录（权限 700）用于存放 SSH 密钥；该目录应通过卷持久化
+#   - 预建 /home/multica/.ssh 目录（权限 700）用于存放 SSH 密钥；该目录应通过卷持久化
 #     （见 README「数据卷」一节），避免容器重建后密钥丢失。
-#   - 容器默认工作目录（WORKDIR）设为 /root/multica_workspaces，与 multica daemon
+#   - 容器默认工作目录（WORKDIR）设为 /home/multica/multica_workspaces，与 multica daemon
 #     的任务工作区基目录一致，方便 shell / 调试命令直接落在任务代码所在区域。
 #   - 预装 GitHub CLI（gh），便于在容器内直接操作 GitHub（PR / issue / workflow 等）。
 #
@@ -33,7 +33,7 @@
 #     pi 等未 pin 的组件仍可能命中 BuildKit 缓存，并非每次构建都会更新。
 #   - multica 安装器与 npm 全局安装默认将二进制放入 /usr/local/bin（root 可写，
 #     已位于默认 PATH），故无需额外修改 PATH。
-#   - 镜像以 root 用户运行（与各安装器的默认布局一致）。
+#   - 构建阶段以 root 安装软件；容器默认以 UID/GID 1000 的 multica 用户运行。
 #   - supervisor 优先检查持久化认证；认证失效时才尝试用 MULTICA_TOKEN 登录。
 
 FROM debian:trixie
@@ -82,6 +82,7 @@ RUN apt-get update \
         tini \
         chromium \
         docker-cli \
+        sudo \
     && rm -rf /var/lib/apt/lists/* \
     && node --version \
     && npm --version
@@ -133,16 +134,31 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --gid 1000 multica \
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/multica --shell /bin/bash multica \
+    && install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh \
+    && install -d -o 1000 -g 1000 -m 0755 /home/multica/.multica /home/multica/.pi/agent /home/multica/.codex /home/multica/.config/gh /home/multica/multica_workspaces \
+    && install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace \
+    && printf '%s\n' 'multica ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/multica \
+    && chmod 0440 /etc/sudoers.d/multica \
+    && visudo -cf /etc/sudoers.d/multica
+
 # 自检阶段前所有 CLI 均位于默认 PATH。
 
-# 预建 SSH 密钥目录与容器工作目录（issue MEM-12）：
-#   - /root/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
-#     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
-#   - /root/multica_workspaces 作为容器默认工作目录（WORKDIR），与 daemon 任务
-#     工作区基目录一致（运行期由 agent-workspaces 卷覆盖）。
-RUN mkdir -p /root/.ssh /root/multica_workspaces \
-    && chmod 700 /root/.ssh
+# 运行用户侧验证全局 CLI。所有安装位置必须对非 root 用户可执行。
+RUN set -eux; \
+    su -s /bin/bash multica -c 'set -euo pipefail; id -u; id -g; test "$HOME" = /home/multica; \
+      pi --version; codex --version; multica version; gh --version; docker --version; \
+      chromium --version; chrome-devtools-mcp --version; python3 --version; jq --version; pnpm --version; \
+      sudo -n id -u | grep -qx 0; test "$(id -u)" = 1000'; \
+    test "$(stat -c %a:%u:%g /home/multica/.ssh)" = 700:1000:1000; \
+    test "$(stat -c %a:%u:%g /run/multica-workspace)" = 755:1000:1000
 
+# 预建运行用户的 SSH 密钥目录与工作目录（issue MEM-12）：
+#   - /home/multica/.ssh 用于存放 SSH 密钥，权限收紧为 700；应通过卷持久化，
+#     否则容器重建后密钥会丢失（见 README「数据卷」一节）。
+#   - /home/multica/multica_workspaces 作为容器默认工作目录（WORKDIR），与 daemon 任务
+#     工作区基目录一致（运行期由 agent-workspaces 卷覆盖）。
 RUN set -eux; \
     pi --version; \
     codex --version; \
@@ -162,9 +178,11 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh
 
-# 容器默认工作目录设为 /root/multica_workspaces（与 daemon 任务工作区基目录一致，
+# 容器默认工作目录设为 /home/multica/multica_workspaces（与 daemon 任务工作区基目录一致，
 # 方便 docker exec 进容器后直接落在任务代码所在区域）。
-WORKDIR /root/multica_workspaces
+ENV HOME=/home/multica
+WORKDIR /home/multica/multica_workspaces
+USER multica
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["--no-auto-update"]
