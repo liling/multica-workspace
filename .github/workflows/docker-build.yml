@@ -79,6 +79,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify pushed image runtime contract
+        run: bash tests/container-smoke.sh "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+
       # 参照 liling/hindsight 的 build-custom.yml 做老版本回收。
       # 关键护栏：对每个候选 version，先查它身上的 tags 列表，
       # 若 `latest` 在里面就跳过，避免 :latest 变成悬空 tag。

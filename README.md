@@ -53,4 +53,4 @@ bash tests/supervisor.sh
 bash tests/image-contract.sh
 ```
 
-项目正式验收由 GitHub Actions 执行 amd64/arm64 构建。不要在本地执行 Docker build 作为验收证据。两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建阶段会校验 CLI、sudo 权限及目录属主/权限。
+GitHub Actions 会执行 amd64/arm64 构建，并对推送镜像运行 `tests/container-smoke.sh`，验证默认身份、CLI/sudo、缺失认证时的 Running/unhealthy 行为及干净停止。不要在本地执行 Docker build 作为验收证据。两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建阶段会校验 CLI、sudo 权限及目录属主/权限。
