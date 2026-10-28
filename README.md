@@ -1,280 +1,56 @@
 # multica-workspace
 
-在容器中运行 Multica 智能体（agent daemon）的镜像。
+基于 Debian trixie 的 Multica 编程 Agent 工作站镜像，支持 `linux/amd64` 与 `linux/arm64`。镜像包含 Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、openssh-client、vim、ripgrep 与 fd-find。
 
-本仓库构建一个基于 Debian trixie 的镜像（系统 Node 为 NodeSource 的 **Node 24**——pi 要求 `node >= 22.19.0`，是下限约束，Node 24 完全满足），预装 **pi** 与 **multica** 两个 CLI，同时附带 **Obscura**（Rust 写的无头浏览器，取代 headless Chrome，见下方「浏览器：Obscura」一节）、**openssh-client**（便于 git+ssh / 远程登录）与 **GitHub CLI（`gh`）**（便于在容器内直接操作 GitHub：PR / issue / workflow 等），容器启动后前台拉起 `multica daemon`，作为一台“设备”接入 Multica 平台、自动领取并执行分配给你的任务。容器默认工作目录为 `/root/multica_workspaces`，SSH 密钥目录 `/root/.ssh` 建议通过卷持久化（见下方「数据卷」）。
+## 生命周期语义
 
-其中 **pi** 是可用的「编程 agent harness」：任务里的 agent 可按需调用 `pi` 来执行编码、审查等子任务；`multica daemon` 仍是容器的 PID 1，负责领取与调度平台任务。
+容器始终由 tini 与 entrypoint supervisor 保持运行。容器 `Running` 表示工作站可进入和诊断；容器 `Healthy` 表示 Multica daemon 正常在线。缺少令牌、认证失败或 daemon 异常时容器保持运行并报告 `unhealthy`，以 5、15、45、60 秒（之后最多每 60 秒）退避重试。已有持久化认证有效时不会重复 login；daemon 稳定存活后重试间隔复位。
 
-- 镜像内容与安装细节见 [`Dockerfile`](./Dockerfile)
-- 镜像由 CI 自动构建并推送到 GHCR，见 [`.github/workflows/docker-build.yml`](./.github/workflows/docker-build.yml)
+状态位于 `/run/multica-workspace/`：`status`、`daemon.pid`、`last-error`。排障可运行：
 
----
-
-## 快速开始（docker-compose）
-
-### 1. 准备令牌
-
-daemon 通过 `multica login` 固化到 `~/.multica/config.json` 的登录态来认证；而 **`MULTICA_TOKEN`** 这个环境变量，是首次启动时把令牌交给 `multica login` 完成固化的来源。先在 Multica 平台生成一个令牌：
-
-- **Cloud Node PAT**（`mcn_...`）—— 推荐，用于长期运行的 daemon 设备
-- **用户 PAT**（`mul_...`）—— 也可使用
-
-> ⚠️ 不要把令牌写死在 `docker-compose.yml` 里或提交到仓库。用 `.env` 文件或密钥管理系统注入。
-
-### 2. 创建 `.env`
-
-在**与 `docker-compose.yml` 同一目录**下创建 `.env`（建议加入 `.gitignore`，不要提交）：
-
-```dotenv
-# 必填：Multica 登录令牌（首次启动由 entrypoint 交给 multica login 固化到 config.json）
-MULTICA_TOKEN=mcn_xxxxxxxxxxxxxxxxxxxxxxxx
-
-# 可选：只监听指定工作区，留空则监听账号下全部工作区
-MULTICA_WORKSPACE_ID=
-
-# 可选：自托管服务器地址（默认 https://api.multica.ai）
-# MULTICA_SERVER_URL=https://api.multica.ai
+```sh
+docker exec <container> cat /run/multica-workspace/status
+docker exec <container> cat /run/multica-workspace/last-error
+docker logs <container>
 ```
 
-> 注意：`.env` 必须是 `KEY=VALUE` 形式，**不要**带 `export` 前缀，也**不要**用引号包裹（如 `MULTICA_TOKEN="..."` 会让引号本身也变成令牌的一部分）。
-> 关键点：`docker compose` 只会自动加载**与 compose 文件同目录**的 `.env`。若 `.env` 放在别的目录，令牌不会被注入，容器就会一直报 `not authenticated: run 'multica login' first`。
+SIGTERM（`docker stop`）会转发到 daemon 并清理 PID 文件。调试可用 `docker run --rm <image> bash` 或 `MULTICA_DEBUG_SHELL=1`。
 
-### 3. 创建 `docker-compose.yml`
+## 启动
 
-```yaml
-services:
-  multica-agent:
-    # 使用 CI 推送到 GHCR 的镜像；也可本地构建（见下方“本地构建”）
-    image: ghcr.io/liling/multica-workspace:latest
+注入 `MULTICA_TOKEN`，并建议持久化 `/root/.multica`、`/root/.pi/agent`、`/root/multica_workspaces` 与 `/root/.ssh`：
 
-    # 容器 HOSTNAME = 平台上显示的 daemon 设备名。
-    # 起一个有辨识度的名字，方便在 Multica 平台识别这台设备。
-    container_name: multica-agent-01
-    hostname: multica-agent-01
-
-    # 通过 env_file 把同目录的 .env 注入容器（含 MULTICA_TOKEN）。
-    # 这是 daemon 拿到认证令牌的可靠方式。
-    env_file:
-      - .env
-
-    environment:
-      # 可选：绑定到某个工作区（留空监听全部）
-      MULTICA_WORKSPACE_ID: ${MULTICA_WORKSPACE_ID:-}
-      # 可选：自托管服务器时覆盖默认服务端地址
-      # MULTICA_SERVER_URL: https://api.multica.ai
-      # 可选：并行执行的最大任务数
-      # MULTICA_DAEMON_MAX_CONCURRENT_TASKS: 2
-
-    # 持久化状态，容器重建后不丢 daemon 身份、pi 配置/凭据和工作区
-    volumes:
-      - multica-state:/root/.multica                    # daemon id / multica 配置
-      # pi 的配置 / 凭据 / 会话集中在 ~/.pi/agent/，建议持久化：
-      - pi-agent:/root/.pi/agent                        # 配置、凭据 auth.json、会话 DB、日志
-      - agent-workspaces:/root/multica_workspaces       # 任务工作区
-      - ssh-keys:/root/.ssh                          # SSH 密钥（见 MEM-12，需持久化）
-
-    restart: unless-stopped
-
-volumes:
-  multica-state:
-  pi-agent:
-  agent-workspaces:
-  ssh-keys:
-```
-
-> **为什么用 `env_file` 而不是直接在 `environment:` 里写 `MULTICA_TOKEN: ${MULTICA_TOKEN:?...}`？**
-> 两种方式都行。但后者依赖“运行 `docker compose` 的 shell 自己已经 `export` 了 `MULTICA_TOKEN`”，容易因为变量没导出、或在别处执行而拿到空值，进而触发 `not authenticated`。用同目录的 `.env` + `env_file` 最省心、首次启动即可用。
-
-> **关于 pi 的配置目录**：pi 把配置、凭据、会话等数据集中存放在 `~/.pi/agent/` 目录下，
-> 其中最关键的是该目录下的 `auth.json`（保存各 provider 的登录凭据）。建议把 `/root/.pi/agent`
-> 通过卷持久化（见 compose 示例），否则容器重建后 pi 会丢失登录、需要重新 `/login`。
-> 与 opencode 不同，pi 不需要分散挂载 XDG 多处——单个卷即可覆盖全部状态。
-
-### 4. 启动
-
-```bash
-docker compose up -d        # 后台启动
-docker compose logs -f      # 查看 daemon 日志
-```
-
-容器启动后，`entrypoint.sh` 会先检查 `MULTICA_TOKEN` 是否已注入：
-- **缺令牌**：直接以非零状态退出，日志里明确提示“未设置 MULTICA_TOKEN”，不会静默一直报 `not authenticated`。
-- **有令牌但未登录**：自动用 `MULTICA_TOKEN` 执行 `multica login --token` 固化登录态（写入 config.json 的 token 字段，daemon 实际读取的就是这里）；**执行 login 之前会先完成 `server_url` / `app_url` 配置**（默认官方地址，可用 `MULTICA_SERVER_URL` / `MULTICA_APP_URL` 覆盖），避免 `login` 报 “No server configured”。若令牌无效则直接报错退出，不再带病启动。
-
-启动后，在 Multica 平台的设备列表里应能看到一台名为 `multica-agent-01` 的设备上线，之后分配给它的任务会被自动领取并执行。
-
-停止 / 重启：
-
-```bash
-docker compose down         # 停止并移除容器（数据卷保留）
-docker compose restart      # 重启
-```
-
----
-
-## 配置项说明
-
-daemon 主要通过环境变量配置。常用项：
-
-| 环境变量 | 必填 | 说明 |
-|---|---|---|
-| `MULTICA_TOKEN` | ✅ | 认证令牌（`mcn_...` Cloud Node PAT 或 `mul_...` 用户 PAT）。首次启动由 entrypoint 交给 `multica login` 固化到 config.json，daemon 读取该固化态 |
-| `MULTICA_WORKSPACE_ID` | | 绑定到指定工作区；留空监听账号下全部工作区 |
-| `MULTICA_SERVER_URL` | | 服务端地址，默认 `https://api.multica.ai`；自托管时覆盖 |
-| `MULTICA_DAEMON_DEVICE_NAME` | | daemon 设备名；镜像默认取容器 `HOSTNAME`（即 compose 里的 `hostname`） |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | | 并行执行的最大任务数 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | | 任务轮询间隔 |
-| `MULTICA_AGENT_TIMEOUT` | | 单任务墙钟时间上限（`0` 表示不限） |
-
-> 更多标志见 `multica daemon start --help`（每个标志都有对应的 `env:` 环境变量）。
-
-### 数据卷
-
-镜像以 `root` 运行，默认数据目录如下，建议全部挂成命名卷以持久化：
-
-| 路径 | 内容 |
-|---|---|
-| `/root/.multica` | multica daemon 身份（`daemon.id`）、CLI 配置 |
-| `/root/.pi/agent` | pi 配置 / 凭据 `auth.json` / 会话等全部状态（**最关键，勿丢**） |
-| `/root/.ssh` | SSH 密钥（`id_rsa` 等），容器重建后仍需保留（见 MEM-12） |
-| `/root/multica_workspaces` | 任务工作区（各任务的代码检出等） |
-
----
-
-## 浏览器：Obscura（取代 headless Chrome）
-
-本镜像以 [**Obscura**](https://github.com/h4ckf0r0day/obscura) 作为**唯一**的浏览器引擎，刻意**不安装 Chrome / Chromium / Playwright Chromium**——Dockerfile 构建期自检会确保 PATH 上不存在任何 `chrome`/`chromium` 二进制，存在即中止构建。Obscura 是用 Rust 写的无头浏览器：自带 V8、跑真实 JavaScript、对外暴露 [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/)（CDP），定位就是 headless Chrome 的平替——**换二进制不换代码**，Puppeteer / Playwright 直连即可。
-
-- 二进制位置：`/usr/local/bin/obscura`、`/usr/local/bin/obscura-worker`（已在默认 PATH 上）。
-- 冷启动近乎即时、常驻内存 ~30MB、预编译二进制 ~70MB，比 headless Chrome 轻得多。
-- Linux 预编译产物要求 glibc >= 2.35；Debian trixie 自带 glibc 2.41，满足。支持 `linux/amd64` 与 `linux/arm64`。
-
-### 常用命令
-
-一次性抓取渲染后的页面（最常用，无需起服务）：
-
-```bash
-# 拿页面标题
-obscura fetch https://example.com --eval "document.title"
-# 渲染后整页 HTML / 纯文本 / 外链
-obscura fetch https://news.ycombinator.com --dump html
-obscura fetch https://example.com --dump text
-obscura fetch https://example.com --dump links
-# 走代理
-obscura --proxy socks5://127.0.0.1:1080 fetch https://example.com --dump text
-```
-
-起一个 CDP 服务，给 Puppeteer / Playwright 连（默认端口 9222，默认绑 127.0.0.1）：
-
-```bash
-obscura serve --port 9222            # 需要反指纹 / 拦截追踪可加 --stealth
-obscura serve --workers 4            # 按 CPU 核数开多 worker
-```
-
-连上去用（Puppeteer / Playwright 代码完全不变，只改连接端点）：
-
-```js
-// Playwright
-const browser = await chromium.connectOverCDP("ws://127.0.0.1:9222");
-// Puppeteer
-const browser = await puppeteer.connect({ browserWSEndpoint: "ws://127.0.0.1:9222/devtools/browser" });
-```
-
-并发抓取 / 给 AI agent 当 MCP server：
-
-```bash
-obscura scrape url1 url2 url3 --concurrency 25 --eval "document.title" --format json
-obscura mcp                          # stdio（默认），供 Claude Desktop / Cursor 等
-obscura mcp --http --port 8080       # endpoint: http://127.0.0.1:8080/mcp
-```
-
-> Obscura 的 CDP 服务**无内置鉴权**——能连到端口就能驱动浏览器。镜像内默认按需启动（agent 需要时自己 `obscura serve` 或 `obscura fetch`），不在 entrypoint 里常驻一个对外的 CDP 端口。若要在容器外暴露，务必只绑 `127.0.0.1` 并经 SSH 转发，或放在带鉴权的反代后面，不要把 9222 直接 `0.0.0.0` 暴露到公网。
-
-### 关于 Playwright Chromium（重要）
-
-镜像**构建期**不安装任何 Chromium。Obscura 是镜像里唯一的浏览器引擎；任何运行期需要的 headless 浏览器能力，请直接使用 `obscura`（详见上一节），不要试图在容器内装 Chrome / Chromium / Playwright Chromium。
-
----
-
-## 本地构建（可选）
-
-若不想用 GHCR 上的镜像，可本地构建：把 compose 里的 `image:` 一行换成 `build:` 段，
-
-```yaml
-services:
-  multica-agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        MULTICA_VERSION: v0.6.1 # 构建前请查询 upstream 最新稳定 release 并更新此值
-    # ...其余同上
-```
-
-然后：
-
-```bash
-docker compose up -d --build
-```
-
-或直接用 docker：
-
-```bash
-docker build --build-arg MULTICA_VERSION=v0.6.1 -t multica-workspace:local .
-docker run -d --name multica-agent-01 --hostname multica-agent-01 \
-  --env-file .env \
+```sh
+docker run -d --name multica-agent --hostname multica-agent \
+  -e MULTICA_TOKEN="$MULTICA_TOKEN" \
   -v multica-state:/root/.multica \
   -v pi-agent:/root/.pi/agent \
   -v agent-workspaces:/root/multica_workspaces \
-  --restart unless-stopped \
-  multica-workspace:local
+  -v ssh-keys:/root/.ssh \
+  ghcr.io/liling/multica-workspace:latest
 ```
 
-> `MULTICA_VERSION` 必填，须使用 upstream 稳定 release tag（如 `v0.6.1`）；本地示例版本仅供演示，使用前请查询最新版本。镜像支持 `linux/amd64` 与 `linux/arm64`。
+Codex 可在容器内直接使用 `codex`。Chrome DevTools MCP 入口为 `chrome-devtools-mcp`; 示例：`npx -y chrome-devtools-mcp --help`。Chromium 可用于 headless/CDP 自动化。
 
-## Multica CLI 版本与构建缓存
+Docker CLI 仅用于连接宿主机 Docker；不应在容器内启动 Docker daemon。需要时挂载宿主 socket：
 
-CI 每次运行先从 `multica-ai/multica` 的 GitHub latest release API 读取稳定 tag，作为 `MULTICA_VERSION` 传入 Dockerfile。安装层直接下载该 tag 对应的官方 `linux/amd64` 或 `linux/arm64` CLI 归档，并将 `multica version` 与目标版本比较；不一致则构建失败。upstream `install.sh` 当前只解析 latest，**不支持 `--version` pin**，因此不用于此处。
+```sh
+-v /var/run/docker.sock:/var/run/docker.sock
+```
 
-之前 Dockerfile 使用 `curl .../install.sh | bash`，但 BuildKit/GHA cache 在指令及前序输入不变时复用安装层，安装器根本不运行；不是安装器不会更新。现在版本是安装层的显式 cache key 输入：新 release 触发重建，版本不变时仍复用缓存。未 pin 的 pi 等其它层同样可能命中缓存，不能保证每次构建更新。main push 更新 `:latest`；PR 分支可通过 Actions 手动运行 `Build and Push Docker Image`，只推 commit SHA tag，不覆盖 `:latest`。合并 main 且对应 Actions 成功后，`:latest` 才更新。
+警告：Docker socket 基本等同宿主机 root 权限；只对可信工作负载挂载，并避免暴露给不可信 agent/task。
 
----
+## 构建与测试
 
-## 常见问题
+```sh
+docker build --build-arg MULTICA_VERSION=v0.6.1 -t multica-workspace:local .
+bash tests/supervisor.sh
+```
 
-- **设备没上线 / 日志报 `not authenticated`**：先确认 `MULTICA_TOKEN` 已注入容器（见下方验证命令）。若已注入仍报错，多半是令牌本身无效或过期——`entrypoint.sh` 现在会在 `multica login --token` 失败时直接以非零状态退出并打印服务端返回的错误，按提示更换有效令牌即可。
-  ```bash
-  docker compose exec multica-agent printenv MULTICA_TOKEN
-  # 应能看到你的 mcn_... / mul_... 令牌；若为空，说明 .env 没被加载
-  docker compose exec multica-agent multica auth status
-  # 应显示已登录（Logged in as ...）；若显示 not authenticated，说明令牌无效/过期
-  docker compose exec multica-agent multica workspace list
-  # 能列出工作区即说明认证成功
-  ```
-  如果 `printenv` 为空但 `docker compose up` 没报错，通常是 `.env` 放错目录、或 `.env` 里用了 `export`/引号导致值解析异常。
-- **想让一台机器跑多个 daemon**：复制一份 service，改成不同的 `container_name` / `hostname`，并使用各自独立的命名卷。
-- **自托管服务器**：设置 `MULTICA_SERVER_URL` 指向你的服务端。
+跨架构复现（需 Docker Buildx 与可用的 QEMU/binfmt）：
 
+```sh
+docker buildx build --platform linux/amd64,linux/arm64 --build-arg MULTICA_VERSION=v0.6.1 --tag multica-workspace:check --load .
+```
 
-## 调试 / 进入容器
-
-entrypoint 默认会把 multica daemon 设为容器的 PID 1 并常驻运行，但你随时可以进到容器里手工调试：
-
-- **运行期间直接 exec**（最常用，不经过 entrypoint）：
-  ```bash
-  docker exec -it <容器名> bash
-  ```
-- **首次启动就进 shell、不拉 daemon**，用命令覆盖：
-  ```bash
-  docker compose run --rm <svc> bash
-  # 或
-  docker run --rm <镜像> bash
-  ```
-- **即使没配 `MULTICA_TOKEN` 也能进 shell**排查环境，设调试开关：
-  ```bash
-  docker run -e MULTICA_DEBUG_SHELL=1 <镜像> bash
-  ```
-  设了 `MULTICA_DEBUG_SHELL=1` 时，entrypoint 会跳过认证与 daemon，直接给出交互 shell。
-
-进 shell 后可手动操作：`multica login --token <令牌>`、`cat ~/.multica/config.json`、`multica auth status`、`printenv MULTICA_TOKEN` 等，方便定位认证或网络问题。
+若本机不能执行两种架构，可通过注册 QEMU 后在支持 Buildx 的 Linux 主机执行；两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建期逐项校验可执行入口。不能用 `--load` 加载多平台镜像时，移除 `--load` 并使用 `--push` 推至临时 registry。
