@@ -15,6 +15,7 @@ mkdir -p "$tmp/bin"
 cat > "$tmp/bin/multica" <<'MOCK'
 #!/usr/bin/env bash
 set -u
+printf '%s\n' "$PWD" > "$MULTICA_STATE_DIR/multica-cwd"
 case "$*" in
   'auth status') [[ "${MOCK_AUTH_OK:-0}" == 1 ]] ;;
   'login --token '* ) [[ "${MOCK_LOGIN_OK:-0}" == 1 ]] ;;
@@ -35,9 +36,10 @@ chmod +x "$tmp/bin/multica"
 
 start_supervisor() {
   local name=$1
-  mkdir -p "$tmp/$name/state"
+  mkdir -p "$tmp/$name/state" "$tmp/$name/home"
   export PATH="$tmp/bin:$PATH"
   export MULTICA_STATE_DIR="$tmp/$name/state"
+  export HOME="$tmp/$name/home"
   export HOSTNAME=test
   "$root/entrypoint.sh" --no-auto-update &
   supervisor_pid=$!
@@ -52,6 +54,10 @@ wait_status() {
   done
   echo "timed out waiting for status=$expected; got $(cat "$MULTICA_STATE_DIR/status" 2>/dev/null || echo missing)" >&2
   return 1
+}
+assert_multica_runs_from_home() {
+  [[ -f "$MULTICA_STATE_DIR/multica-cwd" ]]
+  [[ "$(cat "$MULTICA_STATE_DIR/multica-cwd")" == "$HOME" ]]
 }
 assert_unhealthy() {
   if "$root/healthcheck.sh"; then
@@ -72,6 +78,7 @@ unset MULTICA_TOKEN || true
 export MOCK_AUTH_OK=0 MOCK_LOGIN_OK=0 MOCK_DAEMON_MODE=stable
 start_supervisor missing-token
 wait_status auth-missing
+assert_multica_runs_from_home
 assert_unhealthy
 kill -0 "$supervisor_pid"
 stop_supervisor
@@ -80,6 +87,7 @@ stop_supervisor
 export MULTICA_TOKEN=invalid
 start_supervisor auth-failure
 wait_status auth-failed
+assert_multica_runs_from_home
 assert_unhealthy
 kill -0 "$supervisor_pid"
 stop_supervisor
@@ -89,9 +97,11 @@ export MOCK_AUTH_OK=1 MOCK_DAEMON_MODE=startup-failure
 unset MULTICA_TOKEN || true
 start_supervisor startup-recovery
 wait_status daemon-exited
+assert_multica_runs_from_home
 assert_unhealthy
 [[ $(cat "$MULTICA_STATE_DIR/daemon-attempts") == 1 ]]
 wait_status healthy 20
+assert_multica_runs_from_home
 [[ $(cat "$MULTICA_STATE_DIR/daemon-attempts") -ge 2 ]]
 "$root/healthcheck.sh"
 stop_supervisor
@@ -100,14 +110,16 @@ stop_supervisor
 export MOCK_DAEMON_MODE=stable
 start_supervisor runtime-recovery
 wait_status healthy
+assert_multica_runs_from_home
 first_pid=$(cat "$MULTICA_STATE_DIR/daemon.pid")
 kill -KILL "$first_pid"
 wait_status daemon-exited 5
 assert_unhealthy
 wait_status healthy 20
+assert_multica_runs_from_home
 second_pid=$(cat "$MULTICA_STATE_DIR/daemon.pid")
 [[ "$second_pid" != "$first_pid" ]]
 "$root/healthcheck.sh"
 stop_supervisor
 
-echo 'supervisor lifecycle tests passed: missing auth, auth failure, startup retry, runtime recovery, SIGTERM'
+echo 'supervisor lifecycle tests passed: HOME cwd, missing auth, auth failure, startup retry, runtime recovery, SIGTERM'
