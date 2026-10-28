@@ -91,8 +91,9 @@ RUN apt-get update \
 #   - `--ignore-scripts` 跳过可选的 postinstall 脚本（官方安装说明建议）；
 #   - 二进制落在 npm 全局 bin 目录（root 下 /usr/local/bin/pi），已位于默认 PATH；
 #   - 配置 / 凭据 / 会话等数据落在 ~/.pi/agent/，建议通过卷持久化（见 README）。
-RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-RUN npm install -g @openai/codex chrome-devtools-mcp && npm install -g --allow-scripts=pnpm pnpm
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0
+RUN npm install -g @openai/codex@0.164.0 chrome-devtools-mcp@1.12.0 \
+    && npm install -g --allow-scripts=pnpm pnpm@12.15.0
 
 # upstream install.sh 不支持 --version：直接取指定 release 的官方 CLI 归档。
 # ARG 紧邻安装层；版本变化时 cache key 改变，未变化时保留其它层缓存。
@@ -145,11 +146,15 @@ RUN mkdir -p /root/.ssh /root/multica_workspaces \
 RUN set -eux; \
     pi --version; \
     codex --version; \
+    test "$(pi --version)" = "1.4.0"; \
+    test "$(codex --version)" = "codex-cli 0.164.0"; \
+    test "$(pnpm --version)" = "12.15.0"; \
+    test "$(chrome-devtools-mcp --version)" = "1.12.0"; \
     multica version; \
     gh --version; \
     docker --version; chromium --version; python3 --version; jq --version; pnpm --version; \
     npx --no-install chrome-devtools-mcp --help >/dev/null; \
-    echo "All workstation tools are available."
+    echo "All workstation tools are available at their pinned versions."
 
 # 启动脚本：在拉起 daemon 前校验/固化 MULTICA_TOKEN 认证，未配置则明确失败退出，
 # 避免容器一直静默报 “not authenticated”。详见 entrypoint.sh 头部注释。
