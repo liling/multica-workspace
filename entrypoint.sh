@@ -25,6 +25,13 @@ trap cleanup TERM INT HUP
 if [[ -n "${MULTICA_DEBUG_SHELL:-}" ]]; then exec "${SHELL:-/bin/bash}" "$@"; fi
 if [[ $# -gt 0 && "$1" != "--no-auto-update" ]]; then exec "$@"; fi
 
+# The image WORKDIR is the managed workspaces root for interactive convenience.
+# Multica deliberately marks that tree as daemon-managed, so running local
+# auth/daemon lifecycle commands from inside it can be rejected as nested task
+# execution after the workspace volume has been initialized. Keep the image
+# WORKDIR unchanged, but run the supervisor lifecycle from the user's home.
+cd "${HOME:-/home/multica}" || exit 1
+
 backoff=5
 while (( ! stop )); do
   write_status starting
