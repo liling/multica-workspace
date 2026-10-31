@@ -23,6 +23,15 @@ docker run --rm --entrypoint sh "$image" -lc '
   python3 --version
   jq --version
   pnpm --version
+  command -v host
+  command -v dig
+  command -v nslookup
+  command -v ping
+  command -v wget
+  command -v ip
+  command -v ss
+  command -v nc
+  command -v traceroute
   test "$(id -u)" = 1000
   test "$(sudo -n id -u)" = 0
 '
@@ -41,4 +50,4 @@ done
 docker stop --time 10 "$name" >/dev/null
 [[ "$(docker inspect -f '{{.State.Status}}' "$name")" == exited ]]
 [[ "$(docker inspect -f '{{.State.ExitCode}}' "$name")" == 0 ]]
-echo 'container smoke tests passed: identity, tools, sudo, missing-auth health, stop'
+echo 'container smoke tests passed: identity, tools, network diagnostics, sudo, missing-auth health, stop'
