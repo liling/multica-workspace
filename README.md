@@ -6,14 +6,13 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 
 ### 1. GitHub Actions：bootstrap 镜像
 
-`Dockerfile.bootstrap` 只负责从 GitHub Release 获取最新稳定版 Multica CLI，并发布多架构基础镜像：
+`Dockerfile.bootstrap` 负责从 GitHub Release 获取固定版本的 Multica CLI。当前 GitHub Actions 固定使用 Multica CLI `0.7.1`，并发布多架构基础镜像：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:latest
-ghcr.io/liling/multica-workspace-bootstrap:vX.Y.Z
+ghcr.io/liling/multica-workspace-bootstrap:0.7.1
 ```
 
-工作流每天自动检查一次最新稳定版，也可手动触发。服务器不再调用 GitHub Release API，也不直接下载 Multica Release 文件。
+版本号直接写在 `.github/workflows/docker-build.yml` 的 `MULTICA_VERSION` 中。需要升级 Multica CLI 时，明确修改该版本号后重新构建，不再自动跟随 `latest`。服务器不调用 GitHub Release API，也不直接下载 Multica Release 文件。
 
 ### 2. 服务器：workspace 镜像
 
@@ -29,10 +28,10 @@ ghcr.io/liling/multica-workspace-bootstrap:vX.Y.Z
 默认 bootstrap 地址使用南京大学 GHCR 代理：
 
 ```text
-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:latest
+ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1
 ```
 
-如果部署环境可稳定访问 GHCR，可通过 `.env` 改为 `ghcr.io/liling/multica-workspace-bootstrap:latest`。
+如果部署环境可稳定访问 GHCR，可通过 `.env` 改为 `ghcr.io/liling/multica-workspace-bootstrap:0.7.1`。
 
 ## 启动与更新
 
