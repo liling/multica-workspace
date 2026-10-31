@@ -19,7 +19,7 @@ ARG NODE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/nodejs-release
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 ARG PI_VERSION=1.4.0
-ARG CODEX_VERSION=0.164.0
+ARG CODEX_VERSION=0.166.0
 ARG CHROME_DEVTOOLS_MCP_VERSION=1.12.0
 ARG PNPM_VERSION=12.15.0
 
