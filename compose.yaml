@@ -1,0 +1,37 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      pull: true
+      args:
+        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:latest}
+        DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        NODE_MIRROR: ${NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PI_VERSION: ${PI_VERSION:-1.4.0}
+        CODEX_VERSION: ${CODEX_VERSION:-0.164.0}
+        CHROME_DEVTOOLS_MCP_VERSION: ${CHROME_DEVTOOLS_MCP_VERSION:-1.12.0}
+        PNPM_VERSION: ${PNPM_VERSION:-12.15.0}
+    image: ${MULTICA_WORKSPACE_IMAGE:-multica-workspace:local}
+    restart: unless-stopped
+    environment:
+      MULTICA_TOKEN: ${MULTICA_TOKEN:?MULTICA_TOKEN must be set}
+      MULTICA_WORKSPACE_ID: ${MULTICA_WORKSPACE_ID:-}
+      MULTICA_SERVER_URL: ${MULTICA_SERVER_URL:-https://api.multica.ai}
+    volumes:
+      - multica-state:/home/multica/.multica
+      - pi-agent:/home/multica/.pi/agent
+      - codex-state:/home/multica/.codex
+      - gh-config:/home/multica/.config/gh
+      - ssh-keys:/home/multica/.ssh
+      - agent-workspaces:/home/multica/multica_workspaces
+
+volumes:
+  multica-state:
+  pi-agent:
+  codex-state:
+  gh-config:
+  ssh-keys:
+  agent-workspaces:

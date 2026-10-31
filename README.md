@@ -1,56 +1,107 @@
 # multica-workspace
 
-基于 Debian trixie 的 Multica 编程 Agent 工作站镜像，支持 `linux/amd64` 与 `linux/arm64`。镜像包含 Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、openssh-client、vim、ripgrep 与 fd-find。
+Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目采用“两段式构建”，把必须访问 GitHub 的 Multica CLI 与适合在国内服务器安装/更新的软件环境彻底分开。
+
+## 构建模型
+
+### 1. GitHub Actions：bootstrap 镜像
+
+`Dockerfile.bootstrap` 只负责从 GitHub Release 获取最新稳定版 Multica CLI，并发布多架构基础镜像：
+
+```text
+ghcr.io/liling/multica-workspace-bootstrap:latest
+ghcr.io/liling/multica-workspace-bootstrap:vX.Y.Z
+```
+
+工作流每天自动检查一次最新稳定版，也可手动触发。服务器不再调用 GitHub Release API，也不直接下载 Multica Release 文件。
+
+### 2. 服务器：workspace 镜像
+
+`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。国内源优先使用 TUNA：
+
+- Debian：`https://mirrors.tuna.tsinghua.edu.cn/debian`
+- Debian Security：`https://mirrors.tuna.tsinghua.edu.cn/debian-security`
+- Node.js：`https://mirrors.tuna.tsinghua.edu.cn/nodejs-release`
+- npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
+
+最终镜像包含 Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+
+默认 bootstrap 地址使用南京大学 GHCR 代理：
+
+```text
+ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:latest
+```
+
+如果部署环境可稳定访问 GHCR，可通过 `.env` 改为 `ghcr.io/liling/multica-workspace-bootstrap:latest`。
+
+## 启动与更新
+
+复制环境变量模板：
+
+```sh
+cp .env.example .env
+```
+
+至少填写 `MULTICA_TOKEN`。首次启动或代码发生变化时：
+
+```sh
+docker compose up -d --build
+```
+
+Compose 会在服务器上构建最终 workspace 镜像。软件安装发生在 Docker build 阶段，而不是容器 entrypoint；普通容器重启不会联网安装软件。
+
+需要主动刷新 bootstrap、APT、Node 和 npm 安装层时运行：
+
+```sh
+./scripts/update.sh
+```
+
+该脚本使用 `docker compose build --pull --no-cache`，然后重新启动服务。这样“更新软件”和“运行服务”是两个明确的生命周期。
 
 ## 生命周期语义
 
-容器始终由 tini 与 entrypoint supervisor 保持运行。容器 `Running` 表示工作站可进入和诊断；容器 `Healthy` 表示 Multica daemon 正常在线。缺少令牌、认证失败或 daemon 异常时容器保持运行并报告 `unhealthy`，以 5、15、45、60 秒（之后最多每 60 秒）退避重试。已有持久化认证有效时不会重复 login；daemon 稳定存活后重试间隔复位。
+容器始终由 tini 与 entrypoint supervisor 保持运行。容器 `Running` 表示工作站可进入和诊断；容器 `Healthy` 表示 Multica daemon 正常在线。缺少令牌、认证失败或 daemon 异常时容器保持运行并报告 `unhealthy`，并按退避策略重试。
 
 状态位于 `/run/multica-workspace/`：`status`、`daemon.pid`、`last-error`。排障可运行：
 
 ```sh
-docker exec <container> cat /run/multica-workspace/status
-docker exec <container> cat /run/multica-workspace/last-error
-docker logs <container>
+docker compose exec agent cat /run/multica-workspace/status
+docker compose exec agent cat /run/multica-workspace/last-error
+docker compose logs agent
 ```
 
-SIGTERM（`docker stop`）会转发到 daemon 并清理 PID 文件。调试可用 `docker run --rm <image> bash` 或 `MULTICA_DEBUG_SHELL=1`。
+默认运行用户为 `multica`（UID/GID 1000），HOME 为 `/home/multica`，工作目录为 `/home/multica/multica_workspaces`。持久卷覆盖 Multica、pi、Codex、gh、SSH 与 Agent workspace 状态。
 
-## 启动
+## Docker socket
 
-镜像默认以 `multica`（UID/GID 1000）运行，HOME 和工作目录分别为 `/home/multica` 与 `/home/multica/multica_workspaces`。注入 `MULTICA_TOKEN`，并持久化 `/home/multica/.multica`、`/home/multica/.pi/agent`、`/home/multica/multica_workspaces` 与 `/home/multica/.ssh`：
+镜像只包含 Docker CLI，不在容器内运行 Docker daemon。如果 Agent 需要操作宿主 Docker，可以额外挂载：
+
+```yaml
+volumes:
+  - /var/run/docker.sock:/var/run/docker.sock
+group_add:
+  - "${DOCKER_GID}"
+```
+
+在宿主机设置：
 
 ```sh
-docker run -d --name multica-agent --hostname multica-agent \
-  -e MULTICA_TOKEN="$MULTICA_TOKEN" \
-  -v multica-state:/home/multica/.multica \
-  -v pi-agent:/home/multica/.pi/agent \
-  -v agent-workspaces:/home/multica/multica_workspaces \
-  -v ssh-keys:/home/multica/.ssh \
-  ghcr.io/liling/multica-workspace:latest
+DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
 ```
 
-Codex 可在容器内直接使用 `codex`。Chrome DevTools MCP 入口为 `chrome-devtools-mcp`; 示例：`npx -y chrome-devtools-mcp --help`。Chromium 可用于 headless/CDP 自动化。
+再把该值写入部署用 `.env`。Docker socket 基本等同宿主机 root 权限，只应提供给可信工作负载。
 
-Docker CLI 仅用于连接宿主机 Docker；不应在容器内启动 Docker daemon。需要时挂载宿主 socket：
-
-```sh
--v /var/run/docker.sock:/var/run/docker.sock
-```
-
-显式挂载时，按宿主机 socket 的 GID 为容器增加 supplementary group，例如 `--group-add <socket-gid>`。Docker socket 基本等同宿主机 root 权限；只对可信工作负载挂载，并避免暴露给不可信 agent/task。镜像不预设 docker group，也不修改 socket 权限。
-
-## Breaking migration 与权限风险
-
-此版本将运行用户从 root 改为 UID/GID 1000 的 `multica`，属于 breaking migration。旧容器将卷挂载到 `/root/.multica`、`/root/.pi/agent`、`/root/.ssh` 或 `/root/multica_workspaces` 时，必须把挂载目标改为对应的 `/home/multica/...` 路径；迁移现有数据时请在宿主机备份并调整卷所有权为 UID/GID 1000。镜像不会在 `/root` 建立可写兼容回退。
-
-`multica` 可使用 `/etc/sudoers.d/multica` 中配置的免密码 `sudo`。默认启动进程仍是 UID 1000，但容器内用户可随时取得 root；因此非 root 默认运行可降低意外 root 进程风险，不构成强权限隔离。不要将其视为对抗容器内不可信代码的安全边界。
-
-## 构建与测试
+## 测试
 
 ```sh
 bash tests/supervisor.sh
 bash tests/image-contract.sh
 ```
 
-GitHub Actions 会执行 amd64/arm64 构建，并对推送镜像运行 `tests/container-smoke.sh`，验证默认身份、CLI/sudo、缺失认证时的 Running/unhealthy 行为及干净停止。不要在本地执行 Docker build 作为验收证据。两架构都使用 Debian trixie Chromium 包及 Node/npm 的架构原生构建，构建阶段会校验 CLI、sudo 权限及目录属主/权限。
+构建后的最终镜像还可以执行：
+
+```sh
+bash tests/container-smoke.sh multica-workspace:local
+```
+
+`tests/image-contract.sh` 会确保 GitHub Release 下载只存在于 bootstrap Dockerfile，服务器侧 Dockerfile 使用 TUNA/npmmirror，并保留 UID 1000、sudo、healthcheck 与 supervisor 运行契约。
