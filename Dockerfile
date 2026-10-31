@@ -116,14 +116,34 @@ RUN set -eux; \
     npm install -g @openai/codex@0.164.0 chrome-devtools-mcp@1.12.0; \
     npm install -g --allow-scripts=pnpm pnpm@12.15.0
 
-# Install the requested Multica CLI release. In China mode GitHub release downloads are routed
-# through GITHUB_PROXY_PREFIX; set it to an empty string or a site-local proxy if desired.
-ARG MULTICA_VERSION
+# Create the runtime user and persistent directories before installing Multica so a Multica
+# release update invalidates as few of the heavier workstation layers as possible.
+RUN groupadd --gid 1000 multica \
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/multica --shell /bin/bash multica \
+    && install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh \
+    && install -d -o 1000 -g 1000 -m 0755 /home/multica/.multica /home/multica/.pi/agent /home/multica/.codex /home/multica/.config/gh /home/multica/multica_workspaces \
+    && install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace \
+    && printf '%s\n' 'multica ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/multica \
+    && chmod 0440 /etc/sudoers.d/multica \
+    && visudo -cf /etc/sudoers.d/multica
+
+# Install Multica late in the image. Local/on-prem builds default to the latest stable release;
+# callers can still pass a concrete vX.Y.Z for reproducible builds. GitHub Actions resolves and
+# passes a concrete release explicitly so CI logs and cache keys remain deterministic.
+ARG MULTICA_VERSION=latest
 RUN set -eu; \
-    : "${MULTICA_VERSION:?must pass MULTICA_VERSION (e.g. v0.6.1)}"; \
+    requested="$MULTICA_VERSION"; \
+    if [ "$requested" = latest ]; then \
+        api_url="https://api.github.com/repos/multica-ai/multica/releases/latest"; \
+        if [ "$BUILD_SOURCE" = cn ] && [ -n "$GITHUB_PROXY_PREFIX" ]; then \
+            api_url="${GITHUB_PROXY_PREFIX}${api_url}"; \
+        fi; \
+        echo "Resolving latest Multica release from: ${api_url}"; \
+        MULTICA_VERSION="$(curl -fsSL "$api_url" | jq -r '.tag_name')"; \
+    fi; \
     case "$MULTICA_VERSION" in \
         v[0-9]*.[0-9]*.[0-9]*) ;; \
-        *) echo "Invalid MULTICA_VERSION: $MULTICA_VERSION" >&2; exit 1 ;; \
+        *) echo "Invalid MULTICA_VERSION resolved from '${requested}': ${MULTICA_VERSION}" >&2; exit 1 ;; \
     esac; \
     case "$(dpkg --print-architecture)" in \
         amd64|arm64) MULTICA_ARCH="$(dpkg --print-architecture)" ;; \
@@ -145,15 +165,6 @@ RUN set -eu; \
     actual="$(multica version)"; \
     echo "Multica CLI target: ${MULTICA_VERSION}; installed: ${actual}"; \
     [ "$(printf '%s\n' "$actual" | awk 'NR==1 {print $1 " " $2}')" = "multica ${version}" ]
-
-RUN groupadd --gid 1000 multica \
-    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/multica --shell /bin/bash multica \
-    && install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh \
-    && install -d -o 1000 -g 1000 -m 0755 /home/multica/.multica /home/multica/.pi/agent /home/multica/.codex /home/multica/.config/gh /home/multica/multica_workspaces \
-    && install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace \
-    && printf '%s\n' 'multica ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/multica \
-    && chmod 0440 /etc/sudoers.d/multica \
-    && visudo -cf /etc/sudoers.d/multica
 
 # Verify the tool contract as the runtime user, including the network diagnostics toolbox.
 RUN set -eux; \
