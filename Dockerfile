@@ -5,7 +5,7 @@
 # this file must be buildable from China-friendly mirrors so the server does
 # not need direct access to github.com.
 
-ARG BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:latest
+ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:latest
 FROM ${BOOTSTRAP_IMAGE}
 
 USER root
