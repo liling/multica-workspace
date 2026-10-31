@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1
+#
+# GitHub-built bootstrap image.
+# This stage is intentionally small: it turns the GitHub-only Multica release
+# asset into a normal container layer that on-prem builds can pull through a
+# registry mirror without reaching github.com.
+
+ARG BASE_IMAGE=debian:trixie
+
+FROM ${BASE_IMAGE} AS downloader
+ENV DEBIAN_FRONTEND=noninteractive
+ARG MULTICA_VERSION=latest
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl jq tar \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    requested="$MULTICA_VERSION"; \
+    if [ "$requested" = latest ]; then \
+      MULTICA_VERSION="$(curl -fsSL https://api.github.com/repos/multica-ai/multica/releases/latest | jq -r '.tag_name')"; \
+    fi; \
+    case "$MULTICA_VERSION" in \
+      v[0-9]*.[0-9]*.[0-9]*) ;; \
+      *) echo "Invalid MULTICA_VERSION resolved from '${requested}': ${MULTICA_VERSION}" >&2; exit 1 ;; \
+    esac; \
+    case "$(dpkg --print-architecture)" in \
+      amd64|arm64) MULTICA_ARCH="$(dpkg --print-architecture)" ;; \
+      *) echo "Unsupported Multica architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    version="${MULTICA_VERSION#v}"; \
+    url="https://github.com/multica-ai/multica/releases/download/${MULTICA_VERSION}/multica-cli-${version}-linux-${MULTICA_ARCH}.tar.gz"; \
+    echo "Downloading Multica ${MULTICA_VERSION} for linux/${MULTICA_ARCH}"; \
+    curl -fsSL "$url" -o /tmp/multica.tar.gz; \
+    tar -xzf /tmp/multica.tar.gz -C /tmp multica; \
+    chmod 0755 /tmp/multica; \
+    actual="$(/tmp/multica version)"; \
+    echo "Installed bootstrap Multica: ${actual}"; \
+    [ "$(printf '%s\n' "$actual" | awk 'NR==1 {print $1 " " $2}')" = "multica ${version}" ]
+
+FROM ${BASE_IMAGE}
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=downloader /tmp/multica /usr/local/bin/multica
+RUN multica version
