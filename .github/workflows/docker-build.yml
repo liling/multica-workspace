@@ -74,6 +74,7 @@ jobs:
             ${{ github.ref == 'refs/heads/main' && format('ghcr.io/{0}:latest', github.repository) || '' }}
           build-args: |
             MULTICA_VERSION=${{ steps.multica.outputs.version }}
+            BUILD_SOURCE=official
           # 保留 BuildKit/GHA 缓存；multica 版本变化使安装层及下游层失效，
           # 其余昂贵层仍可复用。未变化时允许命中缓存，并非每次重装。
           cache-from: type=gha
@@ -147,4 +148,3 @@ jobs:
               echo "  -> delete failed for $vid (continuing)"
           done
           echo "Prune step done"
-
