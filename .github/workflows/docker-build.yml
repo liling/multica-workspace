@@ -16,14 +16,13 @@ name: Build Multica Bootstrap Image
       - Dockerfile.bootstrap
       - .github/workflows/docker-build.yml
   workflow_dispatch:
-  schedule:
-    # Keep the GitHub-only Multica layer fresh without requiring the on-prem
-    # server to query GitHub. 02:17 China Standard Time.
-    - cron: '17 18 * * *'
 
 permissions:
   contents: read
   packages: write
+
+env:
+  MULTICA_VERSION: 0.7.1
 
 jobs:
   validate:
@@ -41,17 +40,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-
-      - name: Resolve latest Multica CLI release
-        id: multica
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag=$(gh api repos/multica-ai/multica/releases/latest --jq '.tag_name')
-          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid stable release tag: $tag" >&2; exit 1; }
-          echo "Target Multica CLI release: $tag"
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -73,15 +61,12 @@ jobs:
           file: ./Dockerfile.bootstrap
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:latest
-            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ steps.multica.outputs.version }}
-          build-args: |
-            MULTICA_VERSION=${{ steps.multica.outputs.version }}
+          tags: ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}
+          build-args: MULTICA_VERSION=v${{ env.MULTICA_VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Inspect published multi-arch image
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ steps.multica.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}
