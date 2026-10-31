@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       pull: true
       args:
-        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:latest}
+        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         NODE_MIRROR: ${NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release}
