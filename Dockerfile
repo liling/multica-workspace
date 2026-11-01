@@ -39,7 +39,7 @@ RUN set -eux; \
         /etc/apt/sources.list; \
     fi
 
-# Development, browser and network troubleshooting tools.
+# Development, browser, font and network troubleshooting tools.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -58,6 +58,8 @@ RUN apt-get update \
         build-essential \
         tini \
         chromium \
+        fonts-noto-cjk \
+        fontconfig \
         docker-cli \
         sudo \
         gh \
@@ -66,6 +68,7 @@ RUN apt-get update \
         iproute2 \
         netcat-openbsd \
         traceroute \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 # Install the latest Node 24 patch release from TUNA for the current architecture.
@@ -108,6 +111,7 @@ RUN set -eux; \
     su -s /bin/bash multica -c 'set -euo pipefail; id -u; id -g; test "$HOME" = /home/multica; \
       pi --version; codex --version; multica version; gh --version; docker --version; \
       chromium --version; chrome-devtools-mcp --version; python3 --version; jq --version; pnpm --version; \
+      fc-match "Noto Sans CJK SC" | grep -qi "NotoSansCJK"; \
       command -v host; command -v dig; command -v nslookup; command -v ping; command -v wget; \
       command -v ip; command -v ss; command -v nc; command -v traceroute; \
       sudo -n id -u | grep -qx 0; test "$(id -u)" = 1000'; \
