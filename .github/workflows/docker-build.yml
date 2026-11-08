@@ -22,7 +22,7 @@ permissions:
   packages: write
 
 env:
-  MULTICA_VERSION: 0.7.1
+  MULTICA_VERSION: 0.8.1
 
 jobs:
   validate:
