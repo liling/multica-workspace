@@ -96,6 +96,19 @@ RUN set -eux; \
     npm install -g "@openai/codex@${CODEX_VERSION}" "chrome-devtools-mcp@${CHROME_DEVTOOLS_MCP_VERSION}"; \
     npm install -g --allow-scripts=pnpm "pnpm@${PNPM_VERSION}"
 
+# MEM-742 Guard vNext is vendored byte-for-byte at the reviewed Playbook SHA.
+# Install it at build time: the on-prem server never downloads Guard from GitHub.
+# /etc/codex is a system configuration layer and is not hidden by the
+# persistent /home/multica/.codex Compose volume.
+COPY --chmod=0644 guard-vnext/*.py /etc/codex/hooks/guard-vnext/
+COPY --chmod=0644 guard-vnext/codex-system.toml /etc/codex/config.toml
+RUN set -eux; \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/etc/codex/hooks/guard-vnext \
+      python3 -c 'import guard_vnext, observe_stop; assert guard_vnext.MAX_BLOCKS == 3'; \
+    python3 -c 'import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); h=c["hooks"]["Stop"][0]["hooks"][0]; assert h["command"] == "python3 /etc/codex/hooks/guard-vnext/observe_stop.py" and h["timeout"] == 8'; \
+    test "$(stat -c %a:%u:%g /etc/codex/config.toml)" = 644:0:0; \
+    test "$(stat -c %a:%u:%g /etc/codex/hooks/guard-vnext/guard_vnext.py)" = 644:0:0
+
 RUN groupadd --gid 1000 multica \
     && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/multica --shell /bin/bash multica \
     && install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh \
@@ -114,7 +127,9 @@ RUN set -eux; \
       fc-match "Noto Sans CJK SC" | grep -qi "NotoSansCJK"; \
       command -v host; command -v dig; command -v nslookup; command -v ping; command -v wget; \
       command -v ip; command -v ss; command -v nc; command -v traceroute; \
-      sudo -n id -u | grep -qx 0; test "$(id -u)" = 1000'; \
+      sudo -n id -u | grep -qx 0; \
+      test -r /etc/codex/config.toml; test -r /etc/codex/hooks/guard-vnext/observe_stop.py; \
+      test "$(id -u)" = 1000'; \
     test "$(stat -c %a:%u:%g /home/multica/.ssh)" = 700:1000:1000; \
     test "$(stat -c %a:%u:%g /run/multica-workspace)" = 755:1000:1000
 

@@ -9,12 +9,12 @@ name: Build Multica Bootstrap Image
       - entrypoint.sh
       - healthcheck.sh
       - tests/**
+      - guard-vnext/**
       - .github/workflows/docker-build.yml
   push:
     branches: [main]
     paths:
       - Dockerfile.bootstrap
-      - .github/workflows/docker-build.yml
   workflow_dispatch:
 
 permissions:
@@ -31,7 +31,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
       - name: Validate split-build contract
-        run: bash tests/image-contract.sh
+        run: |
+          bash tests/image-contract.sh
+          bash tests/guard-contract.sh
 
   build-and-push-bootstrap:
     if: github.event_name != 'pull_request'

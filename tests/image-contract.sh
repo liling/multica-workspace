@@ -35,6 +35,9 @@ grep -Fq "multica ALL=(ALL) NOPASSWD: ALL" "$dockerfile"
 ! grep -Eq '/root/|chmod[[:space:]]+666.*docker.sock|docker.sock.*chmod[[:space:]]+666' "$dockerfile"
 grep -Fq 'sudo -n id -u | grep -qx 0' "$dockerfile"
 grep -Fq 'chromium --version' "$dockerfile"
+# Guard is included without a GitHub fetch in the server-side build.
+grep -Fq 'COPY --chmod=0644 guard-vnext/*.py /etc/codex/hooks/guard-vnext/' "$dockerfile"
+grep -Fq 'COPY --chmod=0644 guard-vnext/codex-system.toml /etc/codex/config.toml' "$dockerfile"
 
 if [[ $(id -u) -eq 0 ]]; then
   echo 'Run this suite as an unprivileged user to verify supervisor UID behavior.' >&2
