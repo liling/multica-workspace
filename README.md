@@ -6,10 +6,10 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 
 ### 1. GitHub Actions：bootstrap 镜像
 
-`Dockerfile.bootstrap` 负责从 GitHub Release 获取固定版本的 Multica CLI。当前 GitHub Actions 固定使用 Multica CLI `0.7.1`，并发布多架构基础镜像：
+`Dockerfile.bootstrap` 负责从 GitHub Release 获取固定版本的 Multica CLI。当前 GitHub Actions 固定使用 Multica CLI `0.8.1`，并发布多架构基础镜像：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:0.7.1
+ghcr.io/liling/multica-workspace-bootstrap:0.8.1
 ```
 
 版本号直接写在 `.github/workflows/docker-build.yml` 的 `MULTICA_VERSION` 中。需要升级 Multica CLI 时，明确修改该版本号后重新构建，不再自动跟随 `latest`。服务器不调用 GitHub Release API，也不直接下载 Multica Release 文件。
@@ -25,7 +25,9 @@ ghcr.io/liling/multica-workspace-bootstrap:0.7.1
 
 最终镜像包含已固定版本的 Codex Stop Guard vNext、Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
 
-默认 bootstrap 地址使用南京大学 GHCR 代理：
+为避免影响正在运行的工作站，现有 `Dockerfile`、`compose.yaml` 与 `.env.example` 仍默认使用 `0.7.1`。如需在服务器侧构建包含 CLI `0.8.1` 的最终工作站镜像，请在 `.env` 中显式设置 `BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1`，再运行 `docker compose build --pull agent && docker compose up -d agent`。首次构建前应确保新镜像已在 GHCR 发布并且代理同步可用。
+
+现有部署默认 bootstrap 地址使用南京大学 GHCR 代理：
 
 ```text
 ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1

@@ -9,7 +9,7 @@ ARG BASE_IMAGE=debian:trixie
 
 FROM ${BASE_IMAGE} AS downloader
 ENV DEBIAN_FRONTEND=noninteractive
-ARG MULTICA_VERSION=latest
+ARG MULTICA_VERSION=v0.8.1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl jq tar \
