@@ -34,6 +34,10 @@ docker run --rm --entrypoint sh "$image" -lc '
   command -v traceroute
   test "$(id -u)" = 1000
   test "$(sudo -n id -u)" = 0
+  test -r /etc/codex/config.toml
+  test -r /etc/codex/hooks/guard-vnext/observe_stop.py
+  test -r /etc/codex/hooks/guard-vnext/guard_vnext.py
+  python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8'\''
 '
 
 docker run -d --name "$name" "$image" >/dev/null
@@ -50,4 +54,4 @@ done
 docker stop --time 10 "$name" >/dev/null
 [[ "$(docker inspect -f '{{.State.Status}}' "$name")" == exited ]]
 [[ "$(docker inspect -f '{{.State.ExitCode}}' "$name")" == 0 ]]
-echo 'container smoke tests passed: identity, tools, network diagnostics, sudo, missing-auth health, stop'
+echo 'container smoke tests passed: identity, tools, Stop Guard, network diagnostics, sudo, missing-auth health, stop'

@@ -23,7 +23,7 @@ ghcr.io/liling/multica-workspace-bootstrap:0.7.1
 - Node.js：`https://mirrors.tuna.tsinghua.edu.cn/nodejs-release`
 - npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
 
-最终镜像包含 Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+最终镜像包含已固定版本的 Codex Stop Guard vNext、Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
 
 默认 bootstrap 地址使用南京大学 GHCR 代理：
 
@@ -56,6 +56,32 @@ Compose 会在服务器上构建最终 workspace 镜像。软件安装发生在 
 ```
 
 该脚本使用 `docker compose build --pull --no-cache`，然后重新启动服务。这样“更新软件”和“运行服务”是两个明确的生命周期。
+
+## Codex Stop Guard vNext（默认启用）
+
+镜像在 **Docker build** 阶段内置已验收的 [Multica Agent Playbook Guard](https://github.com/liling/multica-agent-playbook/tree/1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da/tools/run-identity-optin)，固定来源提交：
+
+```text
+1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da (MEM-742 / PR #48)
+```
+
+`guard-vnext/` 下五个 Python 运行文件与该提交 **Git Blob SHA 完全一致**，由 `guard-vnext/source-manifest.txt` 和 `tests/guard-contract.sh` 守护。版本更新需要显式替换文件、更新 SHA 和测试，**不会自动跟随 Playbook 的 main**。
+
+- 文件安装在 `/etc/codex/hooks/guard-vnext/`，由系统级 `/etc/codex/config.toml` 注册 `Stop` Command Hook（`timeout = 8`）。
+- 系统配置不受持久卷 `/home/multica/.codex` 覆盖，原有 Codex 用户配置及 token 不会被改写；Codex 会组合多个配置层的 hooks，如果个人配置也注册同一 Stop Guard，**应删除重复的个人 hook**，避免同一 Stop 被重复检查。
+- 缺少可信 UEP 反馈时，对相同 Run/turn 最多执行三次 `block`，第四次 `retry_exhausted_allow`；平台权威的当前 Run `no_action` 或有效 UEP 反馈直接放行；身份不可信、查询超时或数据不完整时仍 fail-open。
+- 状态数据库 `/home/multica/.multica/guard-stop-budget.sqlite3`、观察日志 `/home/multica/.multica/guard-vnext-shadow.jsonl` 位于已有 `multica-state` 持久卷内。脚本不含模型调用、不对 Multica 发写入请求。
+- 此处是 **Linux 容器的安装方案**，不是 Mac 的 `sudo` 一次性安装脚本；镜像构建不访问 GitHub，也不触碰宿主机 `/etc/codex`。
+
+重新构建并重建容器才能生效：
+
+```sh
+docker compose up -d --build
+docker compose exec agent sh -lc 'cat /etc/codex/config.toml; ls -l /etc/codex/hooks/guard-vnext'
+docker compose exec agent sh -lc 'tail -n 15 ~/.multica/guard-vnext-shadow.jsonl'
+```
+
+最后一条命令需要至少一次实际 Codex Stop 后才会有日志。构建只检验安装与 Hook 合同，**不代表已完成容器内真实 Multica Run E2E**。若需要在个人 `~/.codex/config.toml` 配置额外 hooks，请检查是否与系统级 Stop Hook 重复。
 
 ## 生命周期语义
 
@@ -95,6 +121,7 @@ DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
 ```sh
 bash tests/supervisor.sh
 bash tests/image-contract.sh
+bash tests/guard-contract.sh
 ```
 
 构建后的最终镜像还可以执行：

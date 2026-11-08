@@ -1,0 +1,7 @@
+# Codex system-level Stop hook installed by multica-workspace.
+# Codex also loads hooks from /home/multica/.codex; avoid duplicate entries.
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "python3 /etc/codex/hooks/guard-vnext/observe_stop.py"
+timeout = 8
