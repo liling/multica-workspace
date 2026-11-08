@@ -19,6 +19,11 @@ grep -Fq 'https://registry.npmmirror.com' "$dockerfile"
 grep -Fq 'https://api.github.com/repos/multica-ai/multica/releases/latest' "$bootstrap"
 grep -Fq 'https://github.com/multica-ai/multica/releases/download/' "$bootstrap"
 
+# Keep the bootstrap's pinned CLI version in sync with the publishing workflow.
+bootstrap_version=$(sed -n 's/^ARG MULTICA_VERSION=v//p' "$bootstrap")
+workflow_version=$(sed -n 's/^  MULTICA_VERSION: //p' "$root/.github/workflows/docker-build.yml")
+[[ -n "$bootstrap_version" && "$bootstrap_version" == "$workflow_version" ]]
+
 # Compose builds the final image locally instead of pulling the old monolithic image.
 grep -Fq 'dockerfile: Dockerfile' "$compose"
 grep -Fq 'BOOTSTRAP_IMAGE:' "$compose"
