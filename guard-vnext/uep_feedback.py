@@ -98,7 +98,11 @@ def check_feedback(comments, run_id, agent_id, issue_id=None):
 
 
 def parse_comment(content):
-    """Parse one persisted Comment body against the four fixed UEP lines."""
+    """Parse one persisted Comment body against the four fixed UEP lines.
+
+    ``STATE``, ``RESULT`` and ``NEXT`` must be consecutive lines. Evidence
+    belongs after ``NEXT``; extra lines between fields invalidate the body.
+    """
     if not isinstance(content, str):
         return _incomplete("comment_not_text"), None
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")

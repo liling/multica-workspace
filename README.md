@@ -61,10 +61,10 @@ Compose 会在服务器上构建最终 workspace 镜像。软件安装发生在 
 
 ## Codex Stop Guard vNext（默认启用）
 
-镜像在 **Docker build** 阶段内置已验收的 [Multica Agent Playbook Guard](https://github.com/liling/multica-agent-playbook/tree/1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da/tools/run-identity-optin)，固定来源提交：
+镜像在 **Docker build** 阶段内置已验收的 [Multica Agent Playbook Guard](https://github.com/liling/multica-agent-playbook/tree/56c1ffafdbf061c47f63310acc09801dfbb7e927/tools/run-identity-optin)，固定来源提交：
 
 ```text
-1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da (MEM-742 / PR #48)
+56c1ffafdbf061c47f63310acc09801dfbb7e927 (MEM-773 / Playbook PR #50)
 ```
 
 `guard-vnext/` 下五个 Python 运行文件与该提交 **Git Blob SHA 完全一致**，由 `guard-vnext/source-manifest.txt` 和 `tests/guard-contract.sh` 守护。版本更新需要显式替换文件、更新 SHA 和测试，**不会自动跟随 Playbook 的 main**。
