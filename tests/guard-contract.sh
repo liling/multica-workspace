@@ -3,7 +3,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 manifest="$root/guard-vnext/source-manifest.txt"
-grep -Fxq 'source_commit db313fa2df91fdf9c267c9354741cde51fd9ac65' "$manifest"
+grep -Fxq 'source_commit 07287ffcefe9d0e41b08ced1bd69921931051cab' "$manifest"
 [[ $(grep -c '^blob ' "$manifest") -eq 5 ]]
 for name in guard_vnext.py identity_guard.py multica_provider.py observe_stop.py uep_feedback.py; do
   line="$(grep -E "^blob $name " "$manifest")"

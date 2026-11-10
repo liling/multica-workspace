@@ -1,6 +1,6 @@
 # Guard vNext files copied byte-for-byte from:
-# https://github.com/liling/multica-agent-playbook/tree/db313fa2df91fdf9c267c9354741cde51fd9ac65/tools/run-identity-optin
-source_commit db313fa2df91fdf9c267c9354741cde51fd9ac65
+# https://github.com/liling/multica-agent-playbook/tree/07287ffcefe9d0e41b08ced1bd69921931051cab/tools/run-identity-optin
+source_commit 07287ffcefe9d0e41b08ced1bd69921931051cab
 blob guard_vnext.py b5e9b99ed55b628cf497a23326fe23c2d662a289
 blob identity_guard.py 2b33d59bd684f127edbc0c5d222ffbee31b1e692
 blob multica_provider.py cf22f6deea0f16e280e1bffd9029f9335ca47c22
