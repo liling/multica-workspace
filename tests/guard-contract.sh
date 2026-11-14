@@ -58,6 +58,14 @@ assert check_feedback([record], "other-run", agent, issue)["result"] == "SUSPECT
 assert check_feedback([record], run, "other-agent", issue)["result"] == "SUSPECT_MISSING_FEEDBACK"
 assert check_feedback([record], run, agent, "other-issue")["result"] == "UNKNOWN_ALLOW"
 
+# Thread-reply binding, retained from the superseded MEM-773 PR #36.
+threaded = {**record, "id": "threaded-feedback",
+            "parent_id": "trigger-comment-id", "content": legacy}
+threaded_result = check_feedback([threaded], run, agent, issue)
+assert threaded_result["result"] == "NORMAL_INTENTIONAL_END", threaded_result
+assert threaded_result["feedback_comment_id"] == "threaded-feedback", threaded_result
+assert check_feedback([threaded], "different-run", agent, issue)["result"] == "SUSPECT_MISSING_FEEDBACK"
+
 
 config = tomllib.loads((root / "guard-vnext/codex-system.toml").read_text())
 hooks = config["hooks"]["Stop"]
