@@ -3,7 +3,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 manifest="$root/guard-vnext/source-manifest.txt"
-grep -Fxq 'source_commit 1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da' "$manifest"
+grep -Fxq 'source_commit f53beffb29638e324fd7b264a305ebd5a009503e' "$manifest"
 [[ $(grep -c '^blob ' "$manifest") -eq 5 ]]
 for name in guard_vnext.py identity_guard.py multica_provider.py observe_stop.py uep_feedback.py; do
   line="$(grep -E "^blob $name " "$manifest")"
@@ -27,6 +27,37 @@ root = Path(sys.argv[1])
 sys.path.insert(0, str(root / "guard-vnext"))
 import guard_vnext
 from multica_provider import ProviderRead
+from uep_feedback import parse_comment, check_feedback
+
+# Old K3 feedback must continue to work while deployed agents are unchanged.
+legacy = "UEP_FEEDBACK: 1\nSTATE: DELIVERED\nRESULT: 完成。\nNEXT: NONE"
+assert parse_comment(legacy)[0]["reason"] == "uep_feedback_valid"
+legacy_multiline = "UEP_FEEDBACK: 1\nSTATE: DELIVERED\nRESULT: 完成。\n多行\nNEXT: NONE"
+assert parse_comment(legacy_multiline)[0]["reason"] == "malformed_next_line"
+
+# K4 RESULT spans all remaining lines; a NEXT-like text line is not a header.
+k4 = ("UEP_FEEDBACK: 1\nSTATE: RUN_UNIT_DONE\nNEXT: NONE\nRESULT:\n"
+      "完成。\n- 23 tests\nNEXT: HANDOFF")
+assert parse_comment(k4)[0]["reason"] == "uep_feedback_valid"
+assert parse_comment("UEP_FEEDBACK: 1\nSTATE: DELIVERED\nNEXT: NONE\nRESULT: ")[0]["reason"] == "empty_result"
+
+target = "18c9e9f4-3247-4826-9d4e-086ba8e2b192"
+mention = f"[@浩宇](mention://agent/{target}) 请验收"
+k4_handoff = ("UEP_FEEDBACK: 1\nSTATE: RUN_UNIT_DONE\nNEXT: HANDOFF\nRESULT:\n"
+              "PR #123 完成\n" + mention)
+assert parse_comment(k4_handoff)[1]["target_agent_id"] == target
+assert parse_comment(k4_handoff + "\n" + mention)[0]["reason"] == "handoff_target_ambiguous"
+assert parse_comment(k4_handoff.replace("HANDOFF", "NONE", 1))[0]["reason"] == "unexpected_agent_mention"
+
+run, agent, issue = "run-a", "agent-a", "issue-a"
+record = {"id": "comment-a", "author_id": agent, "source_task_id": run,
+          "issue_id": issue, "type": "comment", "created_at": "2026-11-14T00:00:00Z",
+          "content": k4}
+assert check_feedback([record], run, agent, issue)["result"] == "NORMAL_INTENTIONAL_END"
+assert check_feedback([record], "other-run", agent, issue)["result"] == "SUSPECT_MISSING_FEEDBACK"
+assert check_feedback([record], run, "other-agent", issue)["result"] == "SUSPECT_MISSING_FEEDBACK"
+assert check_feedback([record], run, agent, "other-issue")["result"] == "UNKNOWN_ALLOW"
+
 
 config = tomllib.loads((root / "guard-vnext/codex-system.toml").read_text())
 hooks = config["hooks"]["Stop"]
@@ -86,5 +117,5 @@ with tempfile.TemporaryDirectory() as d:
         "decision": "ALLOW",
         "reason": "no_action_verified_allow",
     }, result
-print("guard contract PASS: exact pin, system hook config, three blocks, bounded allow, no_action")
+print("guard contract PASS: exact pin, K3/K4 parser, identity binding, system hook config, three blocks, bounded allow, no_action")
 PY
