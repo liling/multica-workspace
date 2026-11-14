@@ -61,13 +61,15 @@ Compose 会在服务器上构建最终 workspace 镜像。软件安装发生在 
 
 ## Codex Stop Guard vNext（默认启用）
 
-镜像在 **Docker build** 阶段内置已验收的 [Multica Agent Playbook Guard](https://github.com/liling/multica-agent-playbook/tree/1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da/tools/run-identity-optin)，固定来源提交：
+镜像在 **Docker build** 阶段内置指定版本的 [Multica Agent Playbook Guard](https://github.com/liling/multica-agent-playbook/tree/f53beffb29638e324fd7b264a305ebd5a009503e/tools/run-identity-optin)，固定来源提交：
 
 ```text
-1d297e4622a9c48b7b95bdb897cbb7f4bb49e8da (MEM-742 / PR #48)
+f53beffb29638e324fd7b264a305ebd5a009503e (UEP-K4 兼容升级候选 / Playbook PR #52)
 ```
 
 `guard-vnext/` 下五个 Python 运行文件与该提交 **Git Blob SHA 完全一致**，由 `guard-vnext/source-manifest.txt` 和 `tests/guard-contract.sh` 守护。版本更新需要显式替换文件、更新 SHA 和测试，**不会自动跟随 Playbook 的 main**。
+
+当前新版本仅在 PR 中准备，**尚未合并、构建镜像或安装运行时 Guard**。该版本对 UEP-K3 旧顺序与 UEP-K4 新顺序同时兼容；等实际 Guard 验证通过后，再统一切换 Agent 提示词。
 
 - 文件安装在 `/etc/codex/hooks/guard-vnext/`，由系统级 `/etc/codex/config.toml` 注册 `Stop` Command Hook（`timeout = 8`）。
 - 系统配置不受持久卷 `/home/multica/.codex` 覆盖，原有 Codex 用户配置及 token 不会被改写；Codex 会组合多个配置层的 hooks，如果个人配置也注册同一 Stop Guard，**应删除重复的个人 hook**，避免同一 Stop 被重复检查。
