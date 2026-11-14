@@ -98,7 +98,12 @@ def check_feedback(comments, run_id, agent_id, issue_id=None):
 
 
 def parse_comment(content):
-    """Parse one persisted Comment body against the four fixed UEP lines."""
+    """Parse either UEP-K3 (STATE/RESULT/NEXT) or K4 (STATE/NEXT/RESULT).
+
+    K3 keeps the strict four-line header and checks mentions in the trailing
+    body. K4 makes RESULT the final field; every remaining line belongs to
+    RESULT, including Markdown and field-like text. No heuristic field scan.
+    """
     if not isinstance(content, str):
         return _incomplete("comment_not_text"), None
     lines = content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
@@ -108,18 +113,48 @@ def parse_comment(content):
     if index >= len(lines) or lines[index].rstrip() != MARKER:
         return _incomplete("missing_marker"), None
 
-    fields = {}
-    for expected in ("STATE", "RESULT", "NEXT"):
+    index += 1
+    if index >= len(lines):
+        return _incomplete("missing_state_line"), None
+    match = FIELD_LINE.match(lines[index].strip())
+    if not match or match.group(1) != "STATE":
+        reason = "duplicate_marker" if lines[index].strip() == MARKER else "malformed_state_line"
+        return _incomplete(reason), None
+    state = match.group(2).strip()
+
+    index += 1
+    if index >= len(lines):
+        return _incomplete("missing_result_line"), None
+    first = FIELD_LINE.match(lines[index].strip())
+    if not first or first.group(1) not in ("RESULT", "NEXT"):
+        reason = "duplicate_marker" if lines[index].strip() == MARKER else "malformed_result_line"
+        return _incomplete(reason), None
+
+    if first.group(1) == "RESULT":
+        # Legacy K3: RESULT must be a single, nonempty line, followed by NEXT.
+        result = first.group(2).strip()
         index += 1
         if index >= len(lines):
-            return _incomplete(f"missing_{expected.lower()}_line"), None
-        match = FIELD_LINE.match(lines[index].strip())
-        if not match or match.group(1) != expected:
-            reason = "duplicate_marker" if lines[index].strip() == MARKER else f"malformed_{expected.lower()}_line"
+            return _incomplete("missing_next_line"), None
+        second = FIELD_LINE.match(lines[index].strip())
+        if not second or second.group(1) != "NEXT":
+            reason = "duplicate_marker" if lines[index].strip() == MARKER else "malformed_next_line"
             return _incomplete(reason), None
-        fields[expected] = match.group(2).strip()
+        next_kind = second.group(2).strip()
+        tail = "\n".join(lines[index + 1:]).strip()
+    else:
+        # K4: NEXT precedes RESULT; the rest of the comment is the result.
+        next_kind = first.group(2).strip()
+        index += 1
+        if index >= len(lines):
+            return _incomplete("missing_result_line"), None
+        second = FIELD_LINE.match(lines[index].strip())
+        if not second or second.group(1) != "RESULT":
+            reason = "duplicate_marker" if lines[index].strip() == MARKER else "malformed_result_line"
+            return _incomplete(reason), None
+        result = (second.group(2) + "\n" + "\n".join(lines[index + 1:])).strip()
+        tail = result
 
-    state, result, next_kind = fields["STATE"], fields["RESULT"], fields["NEXT"]
     if state not in STATES:
         return _incomplete("invalid_state"), None
     if not result:
@@ -127,7 +162,6 @@ def parse_comment(content):
     if next_kind not in NEXT_KINDS:
         return _incomplete("invalid_next"), None
 
-    tail = "\n".join(lines[index + 1 :]).strip()
     mentions, mention_reason = _agent_mentions(tail)
     if mention_reason:
         return _incomplete(mention_reason), None
