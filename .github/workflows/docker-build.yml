@@ -68,7 +68,10 @@ jobs:
           build-args: |
             MULTICA_VERSION=v${{ env.MULTICA_VERSION }}
             HERMES_VERSION=v${{ env.HERMES_VERSION }}
-            HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f
+            HERMES_COMMIT=8fc0374447313e276f6b9a2764bfc750190c966a
+            HERMES_ARCHIVE_SHA256=620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0
+            PYTHON_BUILD_STANDALONE_RELEASE=20261124
+            PYTHON_BUILD_STANDALONE_VERSION=3.14.10+20261124
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

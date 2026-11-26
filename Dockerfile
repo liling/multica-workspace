@@ -6,6 +6,11 @@
 # not need direct access to github.com.
 
 ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+ARG PYTHON_VERSION=3.14.10
+ARG PYPI_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG HERMES_VERSION=0.23.4
+ARG HERMES_COMMIT=8fc0374447313e276f6b9a2764bfc750190c966a
+
 FROM ${BOOTSTRAP_IMAGE}
 
 USER root
@@ -17,6 +22,55 @@ ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
 ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG NODE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/nodejs-release
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG PYTHON_VERSION
+ARG PYPI_MIRROR
+ARG HERMES_VERSION
+ARG HERMES_COMMIT
+ENV UV_DEFAULT_INDEX=${PYPI_MIRROR} \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON_PREFERENCE=only-system
+
+RUN mkdir -p /opt/python/${PYTHON_VERSION}
+RUN tar -xzf /opt/python-install-only.tar.gz -C /opt/python/${PYTHON_VERSION} --strip-components=1 \
+    && rm /opt/python-install-only.tar.gz \
+    && /opt/python/${PYTHON_VERSION}/bin/python3.14 --version
+RUN set -eux; \
+    echo "/opt/python/${PYTHON_VERSION}/lib" > /etc/ld.so.conf.d/python-${PYTHON_VERSION}.conf; \
+    ldconfig; \
+    PYTHON="/opt/python/${PYTHON_VERSION}/bin/python3.14"; \
+    "$PYTHON" -m ensurepip; \
+    "$PYTHON" -m pip install --no-cache-dir --index-url "$UV_DEFAULT_INDEX" uv==0.13.5; \
+    ln -sf "/opt/python/${PYTHON_VERSION}/bin/uv" /usr/local/bin/uv; \
+    uv --version
+
+ENV PATH="/opt/hermes/.venv/bin:/opt/python/${PYTHON_VERSION}/bin:${PATH}" \
+    PYTHONUNBUFFERED=1
+
+RUN set -eux; \
+    cd /opt/hermes; \
+    sed -i 's/exclude-newer = "3 days"/exclude-newer = false/' pyproject.toml; \
+    UV_CACHE_DIR=/tmp/uv-cache uv venv --python "/opt/python/${PYTHON_VERSION}/bin/python3.14" \
+      --no-python-downloads /opt/hermes/.venv; \
+    UV_CACHE_DIR=/tmp/uv-cache uv export --frozen \
+      --no-sources-package psutil --no-default-groups --extra acp \
+      --no-emit-project --format requirements.txt --no-header -o /tmp/hermes-requirements.txt \
+      --python "/opt/python/${PYTHON_VERSION}/bin/python3.14" --no-python-downloads; \
+    sed -i '/^psutil @ git+https:\/\/github.com\/giampaolo\/psutil.git/d' /tmp/hermes-requirements.txt; \
+    UV_CACHE_DIR=/tmp/uv-cache uv pip sync --require-hashes --index-url "$UV_DEFAULT_INDEX" \
+      --python "/opt/hermes/.venv/bin/python3.14" /tmp/hermes-requirements.txt; \
+    UV_CACHE_DIR=/tmp/uv-cache uv pip install --no-build-isolation --index-url "$UV_DEFAULT_INDEX" \
+      --python "/opt/hermes/.venv/bin/python3.14" setuptools==84.1.0 wheel==0.48.0; \
+    if grep -Eq 'https?://(github\.com|files\.pythonhosted\.org|pypi\.org/simple)| @ git\+' \
+      /tmp/hermes-requirements.txt; then echo 'unexpected external package source in Linux ACP requirements' >&2; exit 1; fi; \
+    UV_CACHE_DIR=/tmp/uv-cache uv pip install --no-deps --no-build-isolation --index-url "$UV_DEFAULT_INDEX" \
+      --python "/opt/hermes/.venv/bin/python3.14" --editable /opt/hermes; \
+    rm -rf /tmp/uv-cache; \
+    "/opt/python/${PYTHON_VERSION}/bin/python3.14" /opt/hermes/scripts/write_install_stamp.py \
+      --output /opt/hermes/install-stamp.json --commit "$HERMES_COMMIT" --branch "v${HERMES_VERSION}" \
+      --base-version "$HERMES_VERSION" --distance 0 --source ci --distribution docker \
+      --update-mechanism external; \
+    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes; \
+    hermes --version; hermes acp --check
 
 ARG PI_VERSION=1.4.0
 ARG CODEX_VERSION=0.166.0

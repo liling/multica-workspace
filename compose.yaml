@@ -10,6 +10,7 @@ services:
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         NODE_MIRROR: ${NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        PYPI_MIRROR: ${PYPI_MIRROR:-https://pypi.tuna.tsinghua.edu.cn/simple}
         PI_VERSION: ${PI_VERSION:-1.4.0}
         CODEX_VERSION: ${CODEX_VERSION:-0.164.0}
         CHROME_DEVTOOLS_MCP_VERSION: ${CHROME_DEVTOOLS_MCP_VERSION:-1.12.0}
