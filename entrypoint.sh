@@ -32,6 +32,10 @@ if [[ $# -gt 0 && "$1" != "--no-auto-update" ]]; then exec "$@"; fi
 # WORKDIR unchanged, but run the supervisor lifecycle from the user's home.
 cd "${HOME:-/home/multica}" || exit 1
 
+# The Hermes base image sets container-specific state paths; let Hermes and
+# Multica's per-task runtime overlay resolve their own HOME-scoped paths.
+unset HERMES_HOME HERMES_WRITE_SAFE_ROOT
+
 backoff=5
 while (( ! stop )); do
   write_status starting

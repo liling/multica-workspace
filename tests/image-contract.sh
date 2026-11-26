@@ -15,14 +15,26 @@ grep -Fq 'https://mirrors.tuna.tsinghua.edu.cn/debian-security' "$dockerfile"
 grep -Fq 'https://mirrors.tuna.tsinghua.edu.cn/nodejs-release' "$dockerfile"
 grep -Fq 'https://registry.npmmirror.com' "$dockerfile"
 
-# GitHub-only Multica download belongs exclusively to the bootstrap image.
-grep -Fq 'https://api.github.com/repos/multica-ai/multica/releases/latest' "$bootstrap"
+# GitHub-only Multica download belongs exclusively to the pinned bootstrap image.
+! grep -Fq 'https://api.github.com/repos/multica-ai/multica/releases/latest' "$bootstrap"
 grep -Fq 'https://github.com/multica-ai/multica/releases/download/' "$bootstrap"
 
-# Keep the bootstrap's pinned CLI version in sync with the publishing workflow.
+# Keep pinned CLI and Hermes versions in sync with the published image tag.
 bootstrap_version=$(sed -n 's/^ARG MULTICA_VERSION=v//p' "$bootstrap")
 workflow_version=$(sed -n 's/^  MULTICA_VERSION: //p' "$root/.github/workflows/docker-build.yml")
 [[ -n "$bootstrap_version" && "$bootstrap_version" == "$workflow_version" ]]
+hermes_version=$(sed -n 's/^ARG HERMES_VERSION=v//p' "$bootstrap")
+workflow_hermes_version=$(sed -n 's/^  HERMES_VERSION: //p' "$root/.github/workflows/docker-build.yml")
+[[ -n "$hermes_version" && "$hermes_version" == "$workflow_hermes_version" ]]
+grep -Fq 'docker.io/nousresearch/hermes-agent@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f' "$bootstrap"
+grep -Fq 'docker.io/nousresearch/hermes-agent@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f' "$root/.github/workflows/docker-build.yml"
+grep -Fq '82b2b92891f4b51344facfa9f917f067a926453315c6bb87d1f02294635fc4ec' "$bootstrap"
+grep -Fq '1f18a986f612f4291400914b24351d52f3d8502e64b03381db74fbb444493012' "$bootstrap"
+grep -Fq '0.13.0-hermes-0.23.4' "$compose"
+grep -Fq 'hermes-state:/home/multica/.hermes' "$compose"
+grep -Fq 'unset HERMES_HOME HERMES_WRITE_SAFE_ROOT' "$root/entrypoint.sh"
+grep -Fq 'hermes acp --check' "$bootstrap"
+grep -Fq 'push: ${{ github.event_name != '\''pull_request'\'' }}' "$root/.github/workflows/docker-build.yml"
 
 # Compose builds the final image locally instead of pulling the old monolithic image.
 grep -Fq 'dockerfile: Dockerfile' "$compose"

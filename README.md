@@ -6,13 +6,13 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 
 ### 1. GitHub Actions：bootstrap 镜像
 
-`Dockerfile.bootstrap` 负责从 GitHub Release 获取固定版本的 Multica CLI。当前 GitHub Actions 固定使用 Multica CLI `0.8.1`，并发布多架构基础镜像：
+`Dockerfile.bootstrap` 使用 Hermes 官方固定版本多架构容器（tag `v0.23.4` / manifest digest `sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f`）作为兼容运行时，并从 GitHub Release 获取固定版本的 Multica CLI `0.13.0`。发布的新 bootstrap 标签为：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:0.8.1
+ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
 ```
 
-版本号直接写在 `.github/workflows/docker-build.yml` 的 `MULTICA_VERSION` 中。需要升级 Multica CLI 时，明确修改该版本号后重新构建，不再自动跟随 `latest`。服务器不调用 GitHub Release API，也不直接下载 Multica Release 文件。
+Multica 与 Hermes 版本分别固定在 `.github/workflows/docker-build.yml` 的 `MULTICA_VERSION` / `HERMES_VERSION` 中；Multica amd64/arm64 release 压缩包在 bootstrap 构建时校验 SHA-256，Hermes 通过固定 manifest digest 保证双架构来源一致。升级时使用新标签，不覆盖旧 bootstrap 镜像。服务器不调用 GitHub Release API，也不直接下载/安装 Hermes。
 
 ### 2. 服务器：workspace 镜像
 
@@ -23,17 +23,28 @@ ghcr.io/liling/multica-workspace-bootstrap:0.8.1
 - Node.js：`https://mirrors.tuna.tsinghua.edu.cn/nodejs-release`
 - npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
 
-最终镜像包含已固定版本的 Codex Stop Guard vNext、Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+最终镜像包含 Hermes `v0.23.4`（官方 `/opt/hermes` 安装）、Multica CLI `0.13.0`、已固定版本的 Codex Stop Guard vNext、Node.js 24/npm、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。Hermes 官方运行时约 2.4 GiB 未压缩，最终镜像会明显增大；官方 Docker 基座同时支持 `linux/amd64` 与 `linux/arm64`。
 
-为避免影响正在运行的工作站，现有 `Dockerfile`、`compose.yaml` 与 `.env.example` 仍默认使用 `0.7.1`。如需在服务器侧构建包含 CLI `0.8.1` 的最终工作站镜像，请在 `.env` 中显式设置 `BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1`，再运行 `docker compose build --pull agent && docker compose up -d agent`。首次构建前应确保新镜像已在 GHCR 发布并且代理同步可用。
+新配置默认使用新 bootstrap 标签，旧部署不会自动更改；新配置下执行 `docker compose build --pull agent && docker compose up -d agent` 前，确保该标签已发布且代理同步完成。显式更新/回滚方式：
 
-现有部署默认 bootstrap 地址使用南京大学 GHCR 代理：
-
-```text
-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1
+```sh
+# 新版 Multica + Hermes
+export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+docker compose build --pull agent && docker compose up -d agent
+# 回滚到原 CLI 0.8.1（不含 Hermes）
+export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1
+docker compose build --pull agent && docker compose up -d agent
 ```
 
-如果部署环境可稳定访问 GHCR，可通过 `.env` 改为 `ghcr.io/liling/multica-workspace-bootstrap:0.7.1`。
+旧部署原 bootstrap 地址（保留作回滚）：
+
+```text
+ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1
+```
+
+如果部署环境可稳定访问 GHCR，可通过 `.env` 将 registry 域名改为 `ghcr.io`。
+
+Hermes 用户配置、凭证与本机状态位于命名卷 `hermes-state`（`/home/multica/.hermes`，UID/GID 1000）；Hermes 可执行文件留在镜像 `/opt/hermes`，更新镜像不会覆盖该卷。Multica 0.13.0 将每个 Hermes Agent 的跨 Run memory 和 ACP session 分别存入既有 `multica-state` 卷下的 Hermes profile store；Hermes task overlay 将配置/凭证通过链接复用，任务级 skills 与 session 环境由 Multica 管理。因此 `hermes-state` 不是 Agent memory 卷。entrypoint 清除上游容器的 `/opt/data` 环境默认值，让 Hermes/Multica 在任务环境中自行解析 HOME/overlay，不启动 Hermes Gateway。
 
 ## 启动与更新
 

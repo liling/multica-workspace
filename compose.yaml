@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       pull: true
       args:
-        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1}
+        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         NODE_MIRROR: ${NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release}
@@ -22,6 +22,7 @@ services:
       MULTICA_SERVER_URL: ${MULTICA_SERVER_URL:-https://api.multica.ai}
     volumes:
       - multica-state:/home/multica/.multica
+      - hermes-state:/home/multica/.hermes
       - pi-agent:/home/multica/.pi/agent
       - codex-state:/home/multica/.codex
       - gh-config:/home/multica/.config/gh
@@ -30,6 +31,7 @@ services:
 
 volumes:
   multica-state:
+  hermes-state:
   pi-agent:
   codex-state:
   gh-config:

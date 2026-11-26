@@ -2,8 +2,10 @@
 set -euo pipefail
 image=${1:?usage: tests/container-smoke.sh <image>}
 name="multica-smoke-$$"
+hermes_volume="multica-hermes-smoke-$$"
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
+  docker volume rm "$hermes_volume" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -16,6 +18,8 @@ docker run --rm --entrypoint sh "$image" -lc '
   pi --version
   codex --version
   multica version
+  hermes --version
+  hermes acp --check
   gh --version
   docker --version
   chromium --version
@@ -38,6 +42,19 @@ docker run --rm --entrypoint sh "$image" -lc '
   test -r /etc/codex/hooks/guard-vnext/observe_stop.py
   test -r /etc/codex/hooks/guard-vnext/guard_vnext.py
   python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8'\''
+'
+
+docker volume create "$hermes_volume" >/dev/null
+docker run --rm -v "$hermes_volume:/home/multica/.hermes" --entrypoint sh "$image" -c '
+  set -e
+  test "$(id -u):$(id -g)" = 1000:1000
+  printf "persisted\n" > "$HOME/.hermes/smoke-marker"
+  test "$(stat -c "%u:%g" "$HOME/.hermes")" = 1000:1000
+'
+docker run --rm -v "$hermes_volume:/home/multica/.hermes" --entrypoint sh "$image" -c '
+  set -e
+  test "$(cat "$HOME/.hermes/smoke-marker")" = persisted
+  test "$(stat -c "%u:%g" "$HOME/.hermes/smoke-marker")" = 1000:1000
 '
 
 docker run -d --name "$name" "$image" >/dev/null

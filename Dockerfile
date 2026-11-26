@@ -5,7 +5,7 @@
 # this file must be buildable from China-friendly mirrors so the server does
 # not need direct access to github.com.
 
-ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.7.1
+ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
 FROM ${BOOTSTRAP_IMAGE}
 
 USER root
@@ -112,7 +112,7 @@ RUN set -eux; \
 RUN groupadd --gid 1000 multica \
     && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/multica --shell /bin/bash multica \
     && install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh \
-    && install -d -o 1000 -g 1000 -m 0755 /home/multica/.multica /home/multica/.pi/agent /home/multica/.codex /home/multica/.config/gh /home/multica/multica_workspaces \
+    && install -d -o 1000 -g 1000 -m 0755 /home/multica/.multica /home/multica/.hermes /home/multica/.pi/agent /home/multica/.codex /home/multica/.config/gh /home/multica/multica_workspaces \
     && install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace \
     && printf '%s\n' 'multica ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/multica \
     && chmod 0440 /etc/sudoers.d/multica \
@@ -122,7 +122,7 @@ RUN groupadd --gid 1000 multica \
 # every other tool above comes from TUNA/npmmirror-backed server-side installation.
 RUN set -eux; \
     su -s /bin/bash multica -c 'set -euo pipefail; id -u; id -g; test "$HOME" = /home/multica; \
-      pi --version; codex --version; multica version; gh --version; docker --version; \
+      pi --version; codex --version; multica version; hermes --version; hermes acp --check; gh --version; docker --version; \
       chromium --version; chrome-devtools-mcp --version; python3 --version; jq --version; pnpm --version; \
       fc-match "Noto Sans CJK SC" | grep -qi "NotoSansCJK"; \
       command -v host; command -v dig; command -v nslookup; command -v ping; command -v wget; \

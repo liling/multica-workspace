@@ -1,29 +1,31 @@
 # syntax=docker/dockerfile:1
 #
-# GitHub-built bootstrap image.
-# This stage is intentionally small: it turns the GitHub-only Multica release
-# asset into a normal container layer that on-prem builds can pull through a
-# registry mirror without reaching github.com.
+# GitHub-built bootstrap image. Hermes is taken from its official, pinned,
+# multi-architecture container so its complete runtime stays compatible.
 
 ARG BASE_IMAGE=debian:trixie
+ARG HERMES_VERSION=v0.23.4
+ARG HERMES_IMAGE=docker.io/nousresearch/hermes-agent@sha256:ef0650d523ee1b5ab32c779acabc446d9936869a9932591553688a62bcf0c42f
+
+FROM ${HERMES_IMAGE} AS hermes
 
 FROM ${BASE_IMAGE} AS downloader
 ENV DEBIAN_FRONTEND=noninteractive
-ARG MULTICA_VERSION=v0.8.1
+ARG MULTICA_VERSION=v0.13.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl jq tar \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
-    requested="$MULTICA_VERSION"; \
-    if [ "$requested" = latest ]; then \
-      MULTICA_VERSION="$(curl -fsSL https://api.github.com/repos/multica-ai/multica/releases/latest | jq -r '.tag_name')"; \
-    fi; \
-    case "$MULTICA_VERSION" in \
-      v[0-9]*.[0-9]*.[0-9]*) ;; \
-      *) echo "Invalid MULTICA_VERSION resolved from '${requested}': ${MULTICA_VERSION}" >&2; exit 1 ;; \
+    expected_amd64=82b2b92891f4b51344facfa9f917f067a926453315c6bb87d1f02294635fc4ec; \
+    expected_arm64=1f18a986f612f4291400914b24351d52f3d8502e64b03381db74fbb444493012; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) expected_sha256="$expected_amd64" ;; \
+      arm64) expected_sha256="$expected_arm64" ;; \
+      *) echo "Unsupported Multica architecture: $(dpkg --print-architecture)" >&2; exit 2 ;; \
     esac; \
+    test "$MULTICA_VERSION" = v0.13.0; \
     case "$(dpkg --print-architecture)" in \
       amd64|arm64) MULTICA_ARCH="$(dpkg --print-architecture)" ;; \
       *) echo "Unsupported Multica architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
@@ -32,16 +34,18 @@ RUN set -eux; \
     url="https://github.com/multica-ai/multica/releases/download/${MULTICA_VERSION}/multica-cli-${version}-linux-${MULTICA_ARCH}.tar.gz"; \
     echo "Downloading Multica ${MULTICA_VERSION} for linux/${MULTICA_ARCH}"; \
     curl -fsSL "$url" -o /tmp/multica.tar.gz; \
+    echo "$expected_sha256  /tmp/multica.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/multica.tar.gz -C /tmp multica; \
     chmod 0755 /tmp/multica; \
     actual="$(/tmp/multica version)"; \
     echo "Installed bootstrap Multica: ${actual}"; \
     [ "$(printf '%s\n' "$actual" | awk 'NR==1 {print $1 " " $2}')" = "multica ${version}" ]
 
-FROM ${BASE_IMAGE}
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM ${HERMES_IMAGE}
+ARG HERMES_VERSION
+LABEL org.opencontainers.image.hermes.version=${HERMES_VERSION}
 COPY --from=downloader /tmp/multica /usr/local/bin/multica
-RUN multica version
+RUN set -eux; \
+    multica version; \
+    hermes --version; \
+    hermes acp --check
