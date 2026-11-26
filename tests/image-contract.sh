@@ -53,7 +53,15 @@ grep -Fq 'ARG PYTHON_VERSION=3.14.10' "$dockerfile"
 grep -Fq 'tar -xzf /opt/python-install-only.tar.gz' "$dockerfile"
 grep -Fq 'rm /opt/python-install-only.tar.gz' "$dockerfile"
 grep -Fq 'uv venv --python' "$dockerfile"
-grep -Fq 'ENV PATH="/opt/hermes/.venv/bin:/opt/python/${PYTHON_VERSION}/bin:${PATH}"' "$dockerfile"
+! grep -Fq 'ENV PATH="/opt/python/${PYTHON_VERSION}/bin:${PATH}"' "$dockerfile"
+! grep -Fq '/opt/hermes/.venv/bin:${PATH}' "$dockerfile"
+grep -Fq "printf '%s\\n' '#!/bin/sh'" "$dockerfile"
+grep -Fq 'PATH="/opt/hermes/.venv/bin:$PATH"' "$dockerfile"
+grep -Fq 'exec /opt/hermes/.venv/bin/hermes "$@"' "$dockerfile"
+grep -Fq 'test -s /etc/ssl/certs/ca-certificates.crt' "$bootstrap"
+requirements_check=$(grep -n 'unexpected external package source in Linux ACP requirements' "$dockerfile" | cut -d: -f1)
+sync_line=$(grep -n 'uv pip sync --require-hashes' "$dockerfile" | cut -d: -f1)
+[[ "$requirements_check" -lt "$sync_line" ]]
 ! grep -Fq 'HERMES_IMAGE=' "$root/.github/workflows/docker-build.yml"
 grep -Fq 'push: ${{ github.event_name != '\''pull_request'\'' }}' "$root/.github/workflows/docker-build.yml"
 

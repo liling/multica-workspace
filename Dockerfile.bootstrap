@@ -58,6 +58,10 @@ ARG HERMES_VERSION
 ARG HERMES_COMMIT
 LABEL org.opencontainers.image.hermes.version=${HERMES_VERSION} \
       org.opencontainers.image.hermes.revision=${HERMES_COMMIT}
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=downloader /tmp/multica /usr/local/bin/multica
 COPY --from=downloader /opt/hermes /opt/hermes
 COPY --from=downloader /opt/python-install-only.tar.gz /opt/python-install-only.tar.gz

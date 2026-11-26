@@ -32,22 +32,24 @@ Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/ar
 
 体积验收（amd64）：原完整 Hermes bootstrap 本地为 3,341,197,018 bytes 未压缩；旧 OCI image archive 的压缩 blob 合计 1,197,201,822 bytes。精简源码阶段记录为 250,400,856 bytes 未压缩；加入 Python 后本次 bootstrap 本地为 327,105,201 bytes 未压缩，Python 压缩归档为 76,700,449 bytes。新 OCI image archive 为 171,084,288 bytes（压缩 blob 合计 171,075,155 bytes），对比旧压缩 blob 减少约 85.7%，未压缩 image size 减少约 90.2%。这是可复现的本地 OCI 下载体积，不是 GHCR 远程 manifest 实测；尚未发布。amd64 最终 workspace 镜像为 3,468,255,687 bytes 未压缩，完整 container smoke 通过。为完成本地验证，本机 TUNA PyPI/Debian/Node HTTPS 出现 TLS EOF/证书错误，构建分别临时覆盖为 Aliyun PyPI/Debian 与 npmmirror Node；生产默认仍为 TUNA/npmmirror。arm64 Python 归档为 58,939,713 bytes（压缩文件），镜像构建未验证。
 
-新配置默认使用新 bootstrap 标签，旧部署不会自动更改；新配置下执行 `docker compose build --pull agent && docker compose up -d agent` 前，确保该标签已发布且代理同步完成。显式更新/回滚方式：
+新配置默认使用新 bootstrap 标签。升级时先备份 `.env`；若现存 `.env` 明确设置了旧 `BOOTSTRAP_IMAGE`（如 `0.8.1`），将其更新为下方新标签，因为显式旧值会覆盖 Compose 默认值。确保新 bootstrap 标签已发布且代理同步完成，再构建并启动：
 
 ```sh
 # 新版 Multica + Hermes
 export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
 docker compose build --pull agent && docker compose up -d agent
-# 回滚到原 CLI 0.8.1（不含 Hermes）
-export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1
-docker compose build --pull agent && docker compose up -d agent
 ```
 
-旧部署原 bootstrap 地址（保留作回滚）：
+不能只把 `BOOTSTRAP_IMAGE` 改回 `0.8.1` 再用当前 `Dockerfile` 构建：旧 bootstrap 不含 Python standalone 包或 Hermes 源码。升级前应给当前最终镜像打一个本地回滚标签（下例 image 名须与 `.env` 中 `MULTICA_WORKSPACE_IMAGE` 一致；默认值为 `multica-workspace:local`）：
 
-```text
-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1
+```sh
+docker image tag multica-workspace:local multica-workspace:rollback
+# 升级完成后如需回滚，保留所有卷，仅改用升级前的最终镜像：
+printf '\nMULTICA_WORKSPACE_IMAGE=multica-workspace:rollback\n' >> .env
+docker compose up -d --no-build agent
 ```
+
+回滚不删除或重建任何命名卷；不要运行 `docker compose down -v`。若旧最终镜像未预先保留，则用升级前的源码版本（包含对应 `Dockerfile`、`compose.yaml` 与配置）和旧 bootstrap `ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1` 重建，不能混用本次新 Dockerfile。旧 bootstrap tag 保留，不覆盖。
 
 如果部署环境可稳定访问 GHCR，可通过 `.env` 将 registry 域名改为 `ghcr.io`。
 

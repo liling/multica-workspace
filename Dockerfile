@@ -43,8 +43,7 @@ RUN set -eux; \
     ln -sf "/opt/python/${PYTHON_VERSION}/bin/uv" /usr/local/bin/uv; \
     uv --version
 
-ENV PATH="/opt/hermes/.venv/bin:/opt/python/${PYTHON_VERSION}/bin:${PATH}" \
-    PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1
 
 RUN set -eux; \
     cd /opt/hermes; \
@@ -56,12 +55,12 @@ RUN set -eux; \
       --no-emit-project --format requirements.txt --no-header -o /tmp/hermes-requirements.txt \
       --python "/opt/python/${PYTHON_VERSION}/bin/python3.14" --no-python-downloads; \
     sed -i '/^psutil @ git+https:\/\/github.com\/giampaolo\/psutil.git/d' /tmp/hermes-requirements.txt; \
+    if grep -Eq 'https?://(github\.com|files\.pythonhosted\.org|pypi\.org/simple)| @ git\+' \
+      /tmp/hermes-requirements.txt; then echo 'unexpected external package source in Linux ACP requirements' >&2; exit 1; fi; \
     UV_CACHE_DIR=/tmp/uv-cache uv pip sync --require-hashes --index-url "$UV_DEFAULT_INDEX" \
       --python "/opt/hermes/.venv/bin/python3.14" /tmp/hermes-requirements.txt; \
     UV_CACHE_DIR=/tmp/uv-cache uv pip install --no-build-isolation --index-url "$UV_DEFAULT_INDEX" \
       --python "/opt/hermes/.venv/bin/python3.14" setuptools==84.1.0 wheel==0.48.0; \
-    if grep -Eq 'https?://(github\.com|files\.pythonhosted\.org|pypi\.org/simple)| @ git\+' \
-      /tmp/hermes-requirements.txt; then echo 'unexpected external package source in Linux ACP requirements' >&2; exit 1; fi; \
     UV_CACHE_DIR=/tmp/uv-cache uv pip install --no-deps --no-build-isolation --index-url "$UV_DEFAULT_INDEX" \
       --python "/opt/hermes/.venv/bin/python3.14" --editable /opt/hermes; \
     rm -rf /tmp/uv-cache; \
@@ -69,7 +68,9 @@ RUN set -eux; \
       --output /opt/hermes/install-stamp.json --commit "$HERMES_COMMIT" --branch "v${HERMES_VERSION}" \
       --base-version "$HERMES_VERSION" --distance 0 --source ci --distribution docker \
       --update-mechanism external; \
-    ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes; \
+    printf '%s\n' '#!/bin/sh' 'PATH="/opt/hermes/.venv/bin:$PATH"' \
+      'exec /opt/hermes/.venv/bin/hermes "$@"' > /usr/local/bin/hermes; \
+    chmod 0755 /usr/local/bin/hermes; \
     hermes --version; hermes acp --check
 
 ARG PI_VERSION=1.4.0
