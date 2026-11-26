@@ -1,47 +1,68 @@
 # syntax=docker/dockerfile:1
-#
-# GitHub-built bootstrap image.
-# This stage is intentionally small: it turns the GitHub-only Multica release
-# asset into a normal container layer that on-prem builds can pull through a
-# registry mirror without reaching github.com.
-
+# Minimal GitHub-built bootstrap: the Multica CLI and pinned Hermes source/lock.
 ARG BASE_IMAGE=debian:trixie
+ARG HERMES_VERSION=v0.23.4
+ARG HERMES_COMMIT=8fc0374447313e276f6b9a2764bfc750190c966a
+ARG HERMES_ARCHIVE_SHA256=620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0
+ARG PYTHON_BUILD_STANDALONE_RELEASE=20261124
+ARG PYTHON_VERSION=3.14.10
+ARG PYTHON_BUILD_STANDALONE_VERSION=${PYTHON_VERSION}+${PYTHON_BUILD_STANDALONE_RELEASE}
 
 FROM ${BASE_IMAGE} AS downloader
-ENV DEBIAN_FRONTEND=noninteractive
-ARG MULTICA_VERSION=v0.8.1
-
+ARG MULTICA_VERSION=v0.13.0
+ARG HERMES_COMMIT
+ARG HERMES_ARCHIVE_SHA256
+ARG PYTHON_BUILD_STANDALONE_RELEASE
+ARG PYTHON_BUILD_STANDALONE_VERSION
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl jq tar \
     && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    expected_amd64=82b2b92891f4b51344facfa9f917f067a926453315c6bb87d1f02294635fc4ec; \
+    expected_arm64=1f18a986f612f4291400914b24351d52f3d8502e64b03381db74fbb444493012; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) expected_sha256="$expected_amd64" ;; \
+      arm64) expected_sha256="$expected_arm64" ;; \
+      *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 2 ;; \
+    esac; \
+    test "$MULTICA_VERSION" = v0.13.0; \
+    arch="$(dpkg --print-architecture)"; version="${MULTICA_VERSION#v}"; \
+    curl -fsSL "https://github.com/multica-ai/multica/releases/download/${MULTICA_VERSION}/multica-cli-${version}-linux-${arch}.tar.gz" -o /tmp/multica.tar.gz; \
+    echo "$expected_sha256  /tmp/multica.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/multica.tar.gz -C /tmp multica; chmod 0755 /tmp/multica; \
+    /tmp/multica version
 
 RUN set -eux; \
-    requested="$MULTICA_VERSION"; \
-    if [ "$requested" = latest ]; then \
-      MULTICA_VERSION="$(curl -fsSL https://api.github.com/repos/multica-ai/multica/releases/latest | jq -r '.tag_name')"; \
-    fi; \
-    case "$MULTICA_VERSION" in \
-      v[0-9]*.[0-9]*.[0-9]*) ;; \
-      *) echo "Invalid MULTICA_VERSION resolved from '${requested}': ${MULTICA_VERSION}" >&2; exit 1 ;; \
-    esac; \
     case "$(dpkg --print-architecture)" in \
-      amd64|arm64) MULTICA_ARCH="$(dpkg --print-architecture)" ;; \
-      *) echo "Unsupported Multica architecture: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+      amd64) python_arch=x86_64; expected_sha256=bfa2f9fe1691f14a98c37e206641058ad7116db117ac924fdcab744987107ad8 ;; \
+      arm64) python_arch=aarch64; expected_sha256=4a5d38d83b7cab3b1ee53b9fe398ba5bf43d737acca4f7bc06b9deb6ac0e7405 ;; \
+      *) echo "Unsupported architecture: $(dpkg --print-architecture)" >&2; exit 2 ;; \
     esac; \
-    version="${MULTICA_VERSION#v}"; \
-    url="https://github.com/multica-ai/multica/releases/download/${MULTICA_VERSION}/multica-cli-${version}-linux-${MULTICA_ARCH}.tar.gz"; \
-    echo "Downloading Multica ${MULTICA_VERSION} for linux/${MULTICA_ARCH}"; \
-    curl -fsSL "$url" -o /tmp/multica.tar.gz; \
-    tar -xzf /tmp/multica.tar.gz -C /tmp multica; \
-    chmod 0755 /tmp/multica; \
-    actual="$(/tmp/multica version)"; \
-    echo "Installed bootstrap Multica: ${actual}"; \
-    [ "$(printf '%s\n' "$actual" | awk 'NR==1 {print $1 " " $2}')" = "multica ${version}" ]
+    python_asset="cpython-${PYTHON_BUILD_STANDALONE_VERSION}-${python_arch}-unknown-linux-gnu-install_only.tar.gz"; \
+    curl -fsSL "https://github.com/astral-sh/python-build-standalone/releases/download/${PYTHON_BUILD_STANDALONE_RELEASE}/${python_asset}" -o /opt/python-install-only.tar.gz; \
+    echo "${expected_sha256}  /opt/python-install-only.tar.gz" | sha256sum -c -
+
+RUN set -eux; \
+    curl -fsSL "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/${HERMES_COMMIT}" -o /tmp/hermes.tar.gz; \
+    echo "${HERMES_ARCHIVE_SHA256}  /tmp/hermes.tar.gz" | sha256sum -c -; \
+    mkdir -p /opt/hermes; \
+    tar -xzf /tmp/hermes.tar.gz --strip-components=1 -C /opt/hermes; \
+    rm -rf /tmp/hermes.tar.gz /opt/hermes/tests /opt/hermes/tests-js /opt/hermes/website \
+      /opt/hermes/web /opt/hermes/apps /opt/hermes/contributors /opt/hermes/docker \
+      /opt/hermes/nix /opt/hermes/.github /opt/hermes/evals; \
+    test -f /opt/hermes/pyproject.toml; test -f /opt/hermes/uv.lock; \
+    test "$(jq -r '.packages.uv.version' /opt/hermes/pm/lock.json)" = 0.13.5
 
 FROM ${BASE_IMAGE}
-ENV DEBIAN_FRONTEND=noninteractive
+ARG HERMES_VERSION
+ARG HERMES_COMMIT
+LABEL org.opencontainers.image.hermes.version=${HERMES_VERSION} \
+      org.opencontainers.image.hermes.revision=${HERMES_COMMIT}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
+    && test -s /etc/ssl/certs/ca-certificates.crt \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=downloader /tmp/multica /usr/local/bin/multica
-RUN multica version
+COPY --from=downloader /opt/hermes /opt/hermes
+COPY --from=downloader /opt/python-install-only.tar.gz /opt/python-install-only.tar.gz
+RUN set -eux; multica version; du -sh /opt/hermes

@@ -6,34 +6,54 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 
 ### 1. GitHub Actions：bootstrap 镜像
 
-`Dockerfile.bootstrap` 负责从 GitHub Release 获取固定版本的 Multica CLI。当前 GitHub Actions 固定使用 Multica CLI `0.8.1`，并发布多架构基础镜像：
+`Dockerfile.bootstrap` 仅从 GitHub Release 获取固定版本的 Multica CLI `0.13.0`、Hermes `v0.23.4` 固定源码归档（commit `8fc0374447313e276f6b9a2764bfc750190c966a`，SHA-256 `620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0`），以及固定版本的 CPython `3.14.10` python-build-standalone `install_only` 压缩包。它不包含 Hermes venv、常规 PyPI wheel、Node、浏览器或依赖缓存。发布的新 bootstrap 标签为：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:0.8.1
+ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
 ```
 
-版本号直接写在 `.github/workflows/docker-build.yml` 的 `MULTICA_VERSION` 中。需要升级 Multica CLI 时，明确修改该版本号后重新构建，不再自动跟随 `latest`。服务器不调用 GitHub Release API，也不直接下载 Multica Release 文件。
+Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/arm64 `install_only` 压缩包均在 bootstrap 构建时校验 SHA-256。旧标签不覆盖。境外资源只出现在 GitHub Actions bootstrap 构建期间；服务器只拉取 bootstrap 镜像，不访问 GitHub。
 
 ### 2. 服务器：workspace 镜像
 
-`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。国内源优先使用 TUNA：
+`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。Hermes 需要 Python `>=3.14,<3.15`；本方案固定 CPython `3.14.10`，从 bootstrap 中已校验的 `install_only` 压缩包解压，不重复下载或编译 Python。uv `0.13.5` 与 Linux ACP Python 依赖从 TUNA PyPI 安装，不允许 uv 自动下载 Python。依赖版本与 hashes 由 Hermes `uv.lock` 固定；导出使用 `--frozen`，并忽略 `psutil` 的 source override 后排除 Android-only Git dependency（commit `380bd2b59c67b0e1b04bbf3a90b11744f4f96644`）。上游 uv 的 3-day `exclude-newer` 在部分镜像缺失上传时间时会把锁定 ACP 包判为过新，因此仅构建副本禁用该时间过滤；`--frozen` 和安装时 `--require-hashes` 仍约束锁定内容。可选 KittenTTS wheel/misaki Git source 未选择，不进入镜像。
+
+服务器侧安装源：
 
 - Debian：`https://mirrors.tuna.tsinghua.edu.cn/debian`
 - Debian Security：`https://mirrors.tuna.tsinghua.edu.cn/debian-security`
 - Node.js：`https://mirrors.tuna.tsinghua.edu.cn/nodejs-release`
 - npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
+- PyPI：`https://pypi.tuna.tsinghua.edu.cn/simple`
 
-最终镜像包含已固定版本的 Codex Stop Guard vNext、Node.js 24/npm、Multica CLI、pi、Codex CLI、Git、GitHub CLI、Docker CLI、Chromium、Chrome DevTools MCP、Python 3、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+最终镜像包含 Hermes `v0.23.4` Python 源码与 ACP/core 依赖、Multica CLI `0.13.0`、Codex Stop Guard vNext、Node.js 24/npm、pi、Codex CLI、Git、GitHub CLI、Docker CLI、系统 Chromium、Chrome DevTools MCP、Python 3.14.10、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
 
-为避免影响正在运行的工作站，现有 `Dockerfile`、`compose.yaml` 与 `.env.example` 仍默认使用 `0.7.1`。如需在服务器侧构建包含 CLI `0.8.1` 的最终工作站镜像，请在 `.env` 中显式设置 `BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1`，再运行 `docker compose build --pull agent && docker compose up -d agent`。首次构建前应确保新镜像已在 GHCR 发布并且代理同步可用。
+境外资源清单：Multica `v0.13.0` 官方 release（双架构 tarball，无可用国内官方镜像）、Hermes `v0.23.4` commit 归档（无国内镜像，且 tag→commit 固定需原始 Git 归档）、python-build-standalone `20261124` CPython `3.14.10` install_only 压缩包（国内镜像无法稳定保留固定历史 release，按用户授权放入 bootstrap）。它们仅在 bootstrap 构建时下载并校验；Debian、Node、npm、PyPI 均走国内镜像。
 
-现有部署默认 bootstrap 地址使用南京大学 GHCR 代理：
+体积验收（amd64）：原完整 Hermes bootstrap 本地为 3,341,197,018 bytes 未压缩；旧 OCI image archive 的压缩 blob 合计 1,197,201,822 bytes。精简源码阶段记录为 250,400,856 bytes 未压缩；加入 Python 后本次 bootstrap 本地为 327,105,201 bytes 未压缩，Python 压缩归档为 76,700,449 bytes。新 OCI image archive 为 171,084,288 bytes（压缩 blob 合计 171,075,155 bytes），对比旧压缩 blob 减少约 85.7%，未压缩 image size 减少约 90.2%。这是可复现的本地 OCI 下载体积，不是 GHCR 远程 manifest 实测；尚未发布。amd64 最终 workspace 镜像为 3,468,255,687 bytes 未压缩，完整 container smoke 通过。为完成本地验证，本机 TUNA PyPI/Debian/Node HTTPS 出现 TLS EOF/证书错误，构建分别临时覆盖为 Aliyun PyPI/Debian 与 npmmirror Node；生产默认仍为 TUNA/npmmirror。arm64 Python 归档为 58,939,713 bytes（压缩文件），镜像构建未验证。
 
-```text
-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.7.1
+新配置默认使用新 bootstrap 标签。升级时先备份 `.env`；若现存 `.env` 明确设置了旧 `BOOTSTRAP_IMAGE`（如 `0.8.1`），将其更新为下方新标签，因为显式旧值会覆盖 Compose 默认值。确保新 bootstrap 标签已发布且代理同步完成，再构建并启动：
+
+```sh
+# 新版 Multica + Hermes
+export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+docker compose build --pull agent && docker compose up -d agent
 ```
 
-如果部署环境可稳定访问 GHCR，可通过 `.env` 改为 `ghcr.io/liling/multica-workspace-bootstrap:0.7.1`。
+不能只把 `BOOTSTRAP_IMAGE` 改回 `0.8.1` 再用当前 `Dockerfile` 构建：旧 bootstrap 不含 Python standalone 包或 Hermes 源码。升级前应给当前最终镜像打一个本地回滚标签（下例 image 名须与 `.env` 中 `MULTICA_WORKSPACE_IMAGE` 一致；默认值为 `multica-workspace:local`）：
+
+```sh
+docker image tag multica-workspace:local multica-workspace:rollback
+# 升级完成后如需回滚，保留所有卷，仅改用升级前的最终镜像：
+printf '\nMULTICA_WORKSPACE_IMAGE=multica-workspace:rollback\n' >> .env
+docker compose up -d --no-build agent
+```
+
+回滚不删除或重建任何命名卷；不要运行 `docker compose down -v`。若旧最终镜像未预先保留，则用升级前的源码版本（包含对应 `Dockerfile`、`compose.yaml` 与配置）和旧 bootstrap `ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1` 重建，不能混用本次新 Dockerfile。旧 bootstrap tag 保留，不覆盖。
+
+如果部署环境可稳定访问 GHCR，可通过 `.env` 将 registry 域名改为 `ghcr.io`。
+
+Hermes 用户配置、凭证与本机状态位于命名卷 `hermes-state`（`/home/multica/.hermes`，UID/GID 1000）；Hermes 可执行文件留在镜像 `/opt/hermes`，更新镜像不会覆盖该卷。Multica 0.13.0 将每个 Hermes Agent 的跨 Run memory 和 ACP session 分别存入既有 `multica-state` 卷下的 Hermes profile store；Hermes task overlay 将配置/凭证通过链接复用，任务级 skills 与 session 环境由 Multica 管理。因此 `hermes-state` 不是 Agent memory 卷。entrypoint 清除上游容器的 `/opt/data` 环境默认值，让 Hermes/Multica 在任务环境中自行解析 HOME/overlay，不启动 Hermes Gateway。
 
 ## 启动与更新
 
