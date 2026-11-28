@@ -7,6 +7,28 @@ ARG HERMES_ARCHIVE_SHA256=620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6f
 ARG PYTHON_BUILD_STANDALONE_RELEASE=20261124
 ARG PYTHON_VERSION=3.14.10
 ARG PYTHON_BUILD_STANDALONE_VERSION=${PYTHON_VERSION}+${PYTHON_BUILD_STANDALONE_RELEASE}
+ARG GITNEXUS_VERSION=1.6.13-rc.260
+
+FROM node:24-trixie-slim AS gitnexus
+ARG GITNEXUS_VERSION
+WORKDIR /opt/gitnexus
+COPY gitnexus/package.json gitnexus/package-lock.json ./
+RUN npm ci --omit=dev --registry=https://registry.npmjs.org \
+    && node --version \
+    && test "$(node -p 'require("./node_modules/gitnexus/package.json").version')" = "$GITNEXUS_VERSION" \
+    && target="linux-$(node -p 'process.arch')" \
+    && find node_modules -type d \( -name 'linux-*' -o -name 'darwin-*' -o -name 'win32-*' \) \
+         ! -name "$target" -prune -exec rm -rf {} + \
+    && test -s "node_modules/gitnexus/vendor/lbug-fts/prebuilds/$target/libfts.lbug_extension" \
+    && test -s "node_modules/gitnexus/vendor/lbug-vector/prebuilds/$target/libvector.lbug_extension" \
+    && mkdir -p /opt/gitnexus/codex-skills \
+    && for skill in gitnexus-cli gitnexus-debugging gitnexus-exploring gitnexus-guide gitnexus-impact-analysis gitnexus-pdg-query gitnexus-refactoring gitnexus-taint-analysis gitnexus-lfg gitnexus-plan gitnexus-review gitnexus-work; do \
+         mkdir -p "/opt/gitnexus/codex-skills/$skill"; \
+         if [ -f "node_modules/gitnexus/skills/$skill/SKILL.md" ]; then \
+           cp -R "node_modules/gitnexus/skills/$skill/." "/opt/gitnexus/codex-skills/$skill/"; \
+         else cp "node_modules/gitnexus/skills/$skill.md" "/opt/gitnexus/codex-skills/$skill/SKILL.md"; fi; \
+       done \
+    && test "$(find /opt/gitnexus/codex-skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l)" -eq 12
 
 FROM ${BASE_IMAGE} AS downloader
 ARG MULTICA_VERSION=v0.13.0
@@ -54,9 +76,17 @@ RUN set -eux; \
     test "$(jq -r '.packages.uv.version' /opt/hermes/pm/lock.json)" = 0.13.5
 
 FROM ${BASE_IMAGE}
+ARG GITNEXUS_VERSION
+COPY --from=gitnexus /opt/gitnexus /opt/gitnexus
+COPY --from=gitnexus /opt/gitnexus/codex-skills/ /etc/codex/skills/
+RUN printf '%s\n' '#!/bin/sh' 'exec node /opt/gitnexus/node_modules/gitnexus/dist/cli/index.js "$@"' \
+      > /usr/local/bin/gitnexus \
+    && chmod 0755 /usr/local/bin/gitnexus \
+    && test "$(stat -c %a:%u:%g /opt/gitnexus)" = 755:0:0
 ARG HERMES_VERSION
 ARG HERMES_COMMIT
-LABEL org.opencontainers.image.hermes.version=${HERMES_VERSION} \
+LABEL org.opencontainers.image.gitnexus.version=${GITNEXUS_VERSION} \
+      org.opencontainers.image.hermes.version=${HERMES_VERSION} \
       org.opencontainers.image.hermes.revision=${HERMES_COMMIT}
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -65,4 +95,4 @@ RUN apt-get update \
 COPY --from=downloader /tmp/multica /usr/local/bin/multica
 COPY --from=downloader /opt/hermes /opt/hermes
 COPY --from=downloader /opt/python-install-only.tar.gz /opt/python-install-only.tar.gz
-RUN set -eux; multica version; du -sh /opt/hermes
+RUN set -eux; multica version; du -sh /opt/hermes /opt/gitnexus

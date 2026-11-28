@@ -5,3 +5,7 @@
 type = "command"
 command = "python3 /etc/codex/hooks/guard-vnext/observe_stop.py"
 timeout = 8
+
+[mcp_servers.gitnexus]
+command = "/usr/local/bin/gitnexus"
+args = ["mcp"]

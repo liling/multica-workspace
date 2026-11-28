@@ -34,9 +34,21 @@ workflow_version=$(sed -n 's/^  MULTICA_VERSION: //p' "$root/.github/workflows/d
 hermes_version=$(sed -n 's/^ARG HERMES_VERSION=v//p' "$bootstrap")
 workflow_hermes_version=$(sed -n 's/^  HERMES_VERSION: //p' "$root/.github/workflows/docker-build.yml")
 [[ -n "$hermes_version" && "$hermes_version" == "$workflow_hermes_version" ]]
+gitnexus_version=$(sed -n 's/^ARG GITNEXUS_VERSION=//p' "$bootstrap")
+workflow_gitnexus_version=$(sed -n 's/^  GITNEXUS_VERSION: //p' "$root/.github/workflows/docker-build.yml")
+[[ -n "$gitnexus_version" && "$gitnexus_version" == "$workflow_gitnexus_version" ]]
 grep -Fq '82b2b92891f4b51344facfa9f917f067a926453315c6bb87d1f02294635fc4ec' "$bootstrap"
 grep -Fq '1f18a986f612f4291400914b24351d52f3d8502e64b03381db74fbb444493012' "$bootstrap"
-grep -Fq '0.13.0-hermes-0.23.4' "$compose"
+grep -Fq '1.6.13-rc.260' "$bootstrap"
+grep -Fq 'npm ci --omit=dev' "$bootstrap"
+grep -Fq 'gitnexus/package-lock.json' "$bootstrap"
+grep -Fq 'vendor/lbug-fts/prebuilds/$target/libfts.lbug_extension' "$bootstrap"
+grep -Fq 'vendor/lbug-vector/prebuilds/$target/libvector.lbug_extension' "$bootstrap"
+grep -Fq 'find /opt/gitnexus/codex-skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l' "$bootstrap"
+grep -Fq '0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260' "$compose"
+grep -Fq 'mcp_servers.gitnexus' "$root/guard-vnext/codex-system.toml"
+grep -Fq 'args = ["mcp"]' "$root/guard-vnext/codex-system.toml"
+grep -Fq 'ENV GITNEXUS_LBUG_EXTENSION_INSTALL=load-only' "$dockerfile"
 grep -Fq 'hermes-state:/home/multica/.hermes' "$compose"
 grep -Fq 'unset HERMES_HOME HERMES_WRITE_SAFE_ROOT' "$root/entrypoint.sh"
 grep -Fq 'hermes acp --check' "$dockerfile"
@@ -53,6 +65,8 @@ grep -Fq 'PI_VERSION=1.7.0' "$root/.env.example"
 grep -Fq 'CODEX_VERSION=0.172.0' "$root/.env.example"
 grep -Fq 'import mcp' "$dockerfile"
 grep -Fq 'hermes-mcp-smoke.py' "$root/tests/container-smoke.sh"
+grep -Fq 'gitnexus-mcp-smoke.py' "$root/tests/container-smoke.sh"
+grep -Fq 'codex-config-smoke.sh' "$root/tests/container-smoke.sh"
 grep -Fq 'uv pip sync --require-hashes' "$dockerfile"
 grep -Fq 'scripts/write_install_stamp.py' "$dockerfile"
 grep -Fq 'HERMES_VERSION=0.23.4' "$dockerfile"
@@ -88,7 +102,7 @@ grep -Fq 'install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh' "$dockerfile"
 grep -Fq 'install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace' "$dockerfile"
 grep -Fq "multica ALL=(ALL) NOPASSWD: ALL" "$dockerfile"
 ! grep -Eq '/root/|chmod[[:space:]]+666.*docker.sock|docker.sock.*chmod[[:space:]]+666' "$dockerfile"
-grep -Fq 'sudo -n id -u | grep -qx 0' "$dockerfile"
+grep -Fq 'test "$(sudo -n id -u)" = 0' "$root/tests/container-smoke.sh"
 grep -Fq 'chromium --version' "$dockerfile"
 # Guard is included without a GitHub fetch in the server-side build.
 grep -Fq 'COPY --chmod=0644 guard-vnext/*.py /etc/codex/hooks/guard-vnext/' "$dockerfile"
