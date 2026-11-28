@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
       pull: true
       args:
-        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260}
+        BOOTSTRAP_IMAGE: ${BOOTSTRAP_IMAGE:-ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0}
         DEBIAN_MIRROR: ${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         DEBIAN_SECURITY_MIRROR: ${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         NODE_MIRROR: ${NODE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/nodejs-release}

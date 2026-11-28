@@ -5,7 +5,7 @@
 # this file must be buildable from China-friendly mirrors so the server does
 # not need direct access to github.com.
 
-ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
+ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0
 ARG PYTHON_VERSION=3.14.10
 ARG PYPI_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG HERMES_VERSION=0.23.4

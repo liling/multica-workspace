@@ -27,7 +27,7 @@ grep -Fq 'PYTHON_BUILD_STANDALONE_RELEASE=20261124' "$bootstrap"
 grep -Fq 'bfa2f9fe1691f14a98c37e206641058ad7116db117ac924fdcab744987107ad8' "$bootstrap"
 grep -Fq '4a5d38d83b7cab3b1ee53b9fe398ba5bf43d737acca4f7bc06b9deb6ac0e7405' "$bootstrap"
 
-# Keep pinned CLI and Hermes versions in sync with the published image tag.
+# The image tag is exactly the Multica CLI version; component pins stay in sync independently.
 bootstrap_version=$(sed -n 's/^ARG MULTICA_VERSION=v//p' "$bootstrap")
 workflow_version=$(sed -n 's/^  MULTICA_VERSION: //p' "$root/.github/workflows/docker-build.yml")
 [[ -n "$bootstrap_version" && "$bootstrap_version" == "$workflow_version" ]]
@@ -45,7 +45,12 @@ grep -Fq 'gitnexus/package-lock.json' "$bootstrap"
 grep -Fq 'vendor/lbug-fts/prebuilds/$target/libfts.lbug_extension' "$bootstrap"
 grep -Fq 'vendor/lbug-vector/prebuilds/$target/libvector.lbug_extension' "$bootstrap"
 grep -Fq 'find /opt/gitnexus/codex-skills -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l' "$bootstrap"
-grep -Fq '0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260' "$compose"
+[[ "$(sed -n 's/^ARG BOOTSTRAP_IMAGE=.*://p' "$dockerfile")" == "$bootstrap_version" ]]
+[[ "$(sed -n 's/.*multica-workspace-bootstrap:\([^}]*\)}$/\1/p' "$compose")" == "$bootstrap_version" ]]
+[[ "$(sed -n 's/^BOOTSTRAP_IMAGE=.*://p' "$root/.env.example")" == "$bootstrap_version" ]]
+workflow="$root/.github/workflows/docker-build.yml"
+[[ "$(grep -Fc 'multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}' "$workflow")" -eq 2 ]]
+! grep -F 'multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}' "$workflow" | grep -Eq '\}\}[^[:space:]]'
 grep -Fq 'mcp_servers.gitnexus' "$root/guard-vnext/codex-system.toml"
 grep -Fq 'args = ["mcp"]' "$root/guard-vnext/codex-system.toml"
 grep -Fq 'ENV GITNEXUS_LBUG_EXTENSION_INSTALL=load-only' "$dockerfile"

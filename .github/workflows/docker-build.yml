@@ -7,6 +7,7 @@ name: Build Multica Bootstrap Image
       - Dockerfile.bootstrap
       - gitnexus/**
       - compose.yaml
+      - .env.example
       - entrypoint.sh
       - healthcheck.sh
       - tests/**
@@ -16,6 +17,8 @@ name: Build Multica Bootstrap Image
     branches: [main]
     paths:
       - Dockerfile.bootstrap
+      - gitnexus/**
+      - .github/workflows/docker-build.yml
   workflow_dispatch:
 
 permissions:
@@ -66,7 +69,7 @@ jobs:
           file: ./Dockerfile.bootstrap
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}-gitnexus-${{ env.GITNEXUS_VERSION }}
+          tags: ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}
           build-args: |
             MULTICA_VERSION=v${{ env.MULTICA_VERSION }}
             HERMES_VERSION=v${{ env.HERMES_VERSION }}
@@ -82,4 +85,4 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}-gitnexus-${{ env.GITNEXUS_VERSION }}
+            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}

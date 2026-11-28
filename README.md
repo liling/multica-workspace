@@ -9,10 +9,10 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 `Dockerfile.bootstrap` 固定 Multica CLI `0.13.0`、Hermes `v0.23.4` 源码、CPython `3.14.10` install-only 归档，并通过 Node 24 Debian trixie 构建阶段以 npm lockfile 安装 GitNexus `1.6.13-rc.260`。GitNexus 的 Linux amd64/arm64 LadybugDB FTS/VECTOR 扩展和官方 12 项 Skills 随包预置；最终 bootstrap 只接收 GitNexus runtime payload，不带构建 Node/npm 工具链或 npm 缓存。新 bootstrap 标签为：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
+ghcr.io/liling/multica-workspace-bootstrap:0.13.0
 ```
 
-Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/arm64 `install_only` 压缩包均在 bootstrap 构建时校验 SHA-256；GitNexus npm 及传递依赖用提交的 lockfile `integrity` 固定。GitNexus npm 包、LadybugDB 对应架构的 FTS/VECTOR 扩展也仅在 bootstrap 构建阶段获取并预置，workspace 运行时按 `load-only` 从镜像加载，不访问 npm 或扩展源。旧标签不覆盖；服务器只拉取 bootstrap 镜像，不访问 GitHub、npm 或 Ladybug 扩展源。
+Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/arm64 `install_only` 压缩包均在 bootstrap 构建时校验 SHA-256；GitNexus npm 及传递依赖用提交的 lockfile `integrity` 固定。GitNexus npm 包、LadybugDB 对应架构的 FTS/VECTOR 扩展也仅在 bootstrap 构建阶段获取并预置，workspace 运行时按 `load-only` 从镜像加载，不访问 npm 或扩展源。镜像标签仅表示 Multica CLI 版本（不加 `v` 或其他组件后缀）；同一 CLI 版本的 Hermes、GitNexus 等更新会重新发布并覆盖该版本标签，其他历史标签保留。各组件仍独立锁定版本；服务器只拉取 bootstrap 镜像，不访问 GitHub、npm 或 Ladybug 扩展源。
 
 ### 2. 服务器：workspace 镜像
 
@@ -36,11 +36,11 @@ MEM-838 GitNexus amd64 本地验收：bootstrap OCI image 为 685,317,817 bytes�
 
 部署后验证清单（本 PR 不等待这些重型验证）：在 amd64 与 arm64 最终 workspace 镜像中，以非 root 用户、`--network none` 执行 doctor 并确认 FTS/VECTOR available；在新 checkout 验证 index-only、query、context、impact；验证 Docker 容器完整启动/健康检查/停止生命周期、Codex Skills 与真实 MCP tool discovery/call；记录两架构压缩镜像增量。以上运行时项目尚未全部验证，不应以 bootstrap 构建结果替代。
 
-新配置默认使用新 bootstrap 标签。升级时先备份 `.env`；若现存 `.env` 明确设置了旧 `BOOTSTRAP_IMAGE`（如 `0.8.1`），将其更新为下方新标签，因为显式旧值会覆盖 Compose 默认值。确保新 bootstrap 标签已发布且代理同步完成，再构建并启动：
+新配置默认使用新 bootstrap 标签。升级时先备份 `.env`；若现存 `.env` 明确设置了旧 `BOOTSTRAP_IMAGE`（如 `0.8.1` 或此前带组件后缀的标签），将其更新为下方新标签，因为显式旧值会覆盖 Compose 默认值。确保新 bootstrap 标签已发布且代理同步完成，再构建并启动：
 
 ```sh
 # 新版 Multica + Hermes
-export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
+export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0
 docker compose build --pull agent && docker compose up -d agent
 ```
 
@@ -53,7 +53,7 @@ printf '\nMULTICA_WORKSPACE_IMAGE=multica-workspace:rollback\n' >> .env
 docker compose up -d --no-build agent
 ```
 
-回滚不删除或重建任何命名卷；不要运行 `docker compose down -v`。若旧最终镜像未预先保留，则用升级前的源码版本（包含对应 `Dockerfile`、`compose.yaml` 与配置）和旧 bootstrap `ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1` 重建，不能混用本次新 Dockerfile。旧 bootstrap tag 保留，不覆盖。
+回滚不删除或重建任何命名卷；不要运行 `docker compose down -v`。若旧最终镜像未预先保留，则用升级前的源码版本（包含对应 `Dockerfile`、`compose.yaml` 与配置）和旧 bootstrap `ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.8.1` 重建，不能混用本次新 Dockerfile。其他历史 bootstrap 标签保留；同一 Multica CLI 版本的标签会随组件更新而覆盖，因此回滚应优先使用升级前保留的最终镜像或已记录的 bootstrap digest。
 
 如果部署环境可稳定访问 GHCR，可通过 `.env` 将 registry 域名改为 `ghcr.io`。
 
