@@ -182,7 +182,13 @@ RUN set -eux; \
       chromium --version; chrome-devtools-mcp --version; python3 --version; jq --version; pnpm --version; \
       fc-match "Noto Sans CJK SC" | grep -qi "NotoSansCJK"; \
       command -v host; command -v dig; command -v nslookup; command -v ping; command -v wget; \
-      command -v ip; command -v ss; command -v nc; command -v traceroute'; \
+      command -v ip; command -v ss; command -v nc; command -v traceroute; \
+      printf '%s\n' 'checking system Codex config readability'; test -r /etc/codex/config.toml; \
+      printf '%s\n' 'checking Guard hook readability'; test -r /etc/codex/hooks/guard-vnext/observe_stop.py; \
+      printf '%s\n' 'checking GitNexus Skill directory traversal and file readability'; \
+      test -x /etc/codex/skills && test -x /etc/codex/skills/gitnexus-cli; \
+      test -r /etc/codex/skills/gitnexus-cli/SKILL.md; \
+      printf '%s\n' 'checking non-root UID'; test "$(id -u)" = 1000'; \
     test "$(stat -c %a:%u:%g /home/multica/.ssh)" = 700:1000:1000; \
     test "$(stat -c %a:%u:%g /run/multica-workspace)" = 755:1000:1000
 
