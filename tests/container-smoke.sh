@@ -44,6 +44,9 @@ docker run --rm --entrypoint sh "$image" -lc '
   python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8'\''
 '
 
+docker run --rm -i --env PYTHONPATH=/opt/hermes --entrypoint /opt/hermes/.venv/bin/python "$image" - \
+  < "$(dirname "$0")/hermes-mcp-smoke.py"
+
 docker volume create "$hermes_volume" >/dev/null
 docker run --rm -v "$hermes_volume:/home/multica/.hermes" --entrypoint sh "$image" -c '
   set -e

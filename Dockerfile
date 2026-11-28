@@ -51,7 +51,7 @@ RUN set -eux; \
     UV_CACHE_DIR=/tmp/uv-cache uv venv --python "/opt/python/${PYTHON_VERSION}/bin/python3.14" \
       --no-python-downloads /opt/hermes/.venv; \
     UV_CACHE_DIR=/tmp/uv-cache uv export --frozen \
-      --no-sources-package psutil --no-default-groups --extra acp \
+      --no-sources-package psutil --no-default-groups --extra acp --extra mcp \
       --no-emit-project --format requirements.txt --no-header -o /tmp/hermes-requirements.txt \
       --python "/opt/python/${PYTHON_VERSION}/bin/python3.14" --no-python-downloads; \
     sed -i '/^psutil @ git+https:\/\/github.com\/giampaolo\/psutil.git/d' /tmp/hermes-requirements.txt; \
@@ -63,6 +63,7 @@ RUN set -eux; \
       --python "/opt/hermes/.venv/bin/python3.14" setuptools==84.1.0 wheel==0.48.0; \
     UV_CACHE_DIR=/tmp/uv-cache uv pip install --no-deps --no-build-isolation --index-url "$UV_DEFAULT_INDEX" \
       --python "/opt/hermes/.venv/bin/python3.14" --editable /opt/hermes; \
+    "/opt/hermes/.venv/bin/python3.14" -c 'import mcp'; \
     rm -rf /tmp/uv-cache; \
     "/opt/python/${PYTHON_VERSION}/bin/python3.14" /opt/hermes/scripts/write_install_stamp.py \
       --output /opt/hermes/install-stamp.json --commit "$HERMES_COMMIT" --branch "v${HERMES_VERSION}" \
@@ -73,8 +74,8 @@ RUN set -eux; \
     chmod 0755 /usr/local/bin/hermes; \
     hermes --version; hermes acp --check
 
-ARG PI_VERSION=1.4.0
-ARG CODEX_VERSION=0.166.0
+ARG PI_VERSION=1.7.0
+ARG CODEX_VERSION=0.172.0
 ARG CHROME_DEVTOOLS_MCP_VERSION=1.12.0
 ARG PNPM_VERSION=12.15.0
 
