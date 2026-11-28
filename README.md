@@ -16,7 +16,7 @@ Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/ar
 
 ### 2. 服务器：workspace 镜像
 
-`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。Hermes 需要 Python `>=3.14,<3.15`；本方案固定 CPython `3.14.10`，从 bootstrap 中已校验的 `install_only` 压缩包解压，不重复下载或编译 Python。uv `0.13.5` 与 Linux ACP Python 依赖从 TUNA PyPI 安装，不允许 uv 自动下载 Python。依赖版本与 hashes 由 Hermes `uv.lock` 固定；导出使用 `--frozen`，并忽略 `psutil` 的 source override 后排除 Android-only Git dependency（commit `380bd2b59c67b0e1b04bbf3a90b11744f4f96644`）。上游 uv 的 3-day `exclude-newer` 在部分镜像缺失上传时间时会把锁定 ACP 包判为过新，因此仅构建副本禁用该时间过滤；`--frozen` 和安装时 `--require-hashes` 仍约束锁定内容。可选 KittenTTS wheel/misaki Git source 未选择，不进入镜像。
+`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。Hermes 需要 Python `>=3.14,<3.15`；本方案固定 CPython `3.14.10`，从 bootstrap 中已校验的 `install_only` 压缩包解压，不重复下载或编译 Python。uv `0.13.5` 与 Linux ACP/MCP Python 依赖从 TUNA PyPI 安装，不允许 uv 自动下载 Python。依赖版本与 hashes 由 Hermes `uv.lock` 固定；导出使用 `--frozen`，启用 Hermes 的 `acp` 与 `mcp` extras，并忽略 `psutil` 的 source override 后排除 Android-only Git dependency（commit `380bd2b59c67b0e1b04bbf3a90b11744f4f96644`）。MCP extra 固定 `mcp==2.3.0`、`httpx2==2.15.1` 与 `starlette==1.9.0`。上游 uv 的 3-day `exclude-newer` 在部分镜像缺失上传时间时会把锁定包判为过新，因此仅构建副本禁用该时间过滤；`--frozen` 和安装时 `--require-hashes` 仍约束锁定内容。可选 KittenTTS wheel/misaki Git source 未选择，不进入镜像。
 
 服务器侧安装源：
 
@@ -26,7 +26,7 @@ Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/ar
 - npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
 - PyPI：`https://pypi.tuna.tsinghua.edu.cn/simple`
 
-最终镜像包含 Hermes `v0.23.4` Python 源码与 ACP/core 依赖、Multica CLI `0.13.0`、Codex Stop Guard vNext、Node.js 24/npm、pi、Codex CLI、Git、GitHub CLI、Docker CLI、系统 Chromium、Chrome DevTools MCP、Python 3.14.10、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+截至 2026-11-28，官方 npm `latest` dist-tag 指向 pi `1.7.0`（2026-11-28 00:58 CST 更新）与 Codex CLI `0.172.0`（2026-11-28 01:16 CST 更新）；以这些精确版本固定镜像，官方包元数据分别见 [pi npm package](https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest) 与 [Codex npm package](https://registry.npmjs.org/@openai/codex/latest)。Dockerfile 与 Compose 默认值保持一致。最终镜像包含 Hermes `v0.23.4` Python 源码与 ACP/MCP/core 依赖、Multica CLI `0.13.0`、Codex Stop Guard vNext、Node.js 24/npm、pi `1.7.0`、Codex CLI `0.172.0`、Git、GitHub CLI、Docker CLI、系统 Chromium、Chrome DevTools MCP、Python 3.14.10、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
 
 境外资源清单：Multica `v0.13.0` 官方 release（双架构 tarball，无可用国内官方镜像）、Hermes `v0.23.4` commit 归档（无国内镜像，且 tag→commit 固定需原始 Git 归档）、python-build-standalone `20261124` CPython `3.14.10` install_only 压缩包（国内镜像无法稳定保留固定历史 release，按用户授权放入 bootstrap）。它们仅在 bootstrap 构建时下载并校验；Debian、Node、npm、PyPI 均走国内镜像。
 
@@ -155,3 +155,4 @@ bash tests/container-smoke.sh multica-workspace:local
 ```
 
 `tests/image-contract.sh` 会确保 GitHub Release 下载只存在于 bootstrap Dockerfile，服务器侧 Dockerfile 使用 TUNA/npmmirror，并保留 UID 1000、sudo、healthcheck 与 supervisor 运行契约。
+`tests/container-smoke.sh` 还会通过 Hermes venv 的 MCP SDK 发现本地 `add` 工具并调用，确认 MCP client 能实际完成本地协议往返。
