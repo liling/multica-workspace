@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 image=${1:?usage: tests/container-smoke.sh <image>}
+script_dir=$(cd "$(dirname "$0")" && pwd)
 name="multica-smoke-$$"
 hermes_volume="multica-hermes-smoke-$$"
+codex_volume="multica-codex-smoke-$$"
 cleanup() {
   docker rm -f "$name" >/dev/null 2>&1 || true
-  docker volume rm "$hermes_volume" >/dev/null 2>&1 || true
+  docker volume rm "$hermes_volume" "$codex_volume" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
 identity=$(docker run --rm --entrypoint sh "$image" -lc 'id -u; id -g; whoami; echo "$HOME"; pwd')
 expected=$(printf '1000\n1000\nmultica\n/home/multica\n/home/multica/multica_workspaces')
 [[ "$identity" == "$expected" ]]
+
+docker run --rm --network none --entrypoint sh "$image" -lc '
+  set -e
+  doctor=$(gitnexus doctor 2>&1)
+  printf "%s\n" "$doctor" | grep -Fq "Full-text search: available"
+  printf "%s\n" "$doctor" | grep -Fq "VECTOR extension: available"
+  printf "%s\n" "$doctor" | grep -Fq "analyze=load-only"
+  printf "%s\n" "$doctor" | grep -E "Full-text search: available|VECTOR extension: available|analyze=load-only"
+'
 
 docker run --rm --entrypoint sh "$image" -lc '
   set -e
@@ -42,19 +53,32 @@ docker run --rm --entrypoint sh "$image" -lc '
   test -r /etc/codex/hooks/guard-vnext/observe_stop.py
   test -r /etc/codex/hooks/guard-vnext/guard_vnext.py
   test -r /etc/codex/skills/gitnexus-cli/SKILL.md
-  gitnexus doctor | grep -q "analyze=load-only"
+  doctor=$(gitnexus doctor 2>&1)
+  printf "%s\n" "$doctor" | grep -Fq "Full-text search: available"
+  printf "%s\n" "$doctor" | grep -Fq "VECTOR extension: available"
+  printf "%s\n" "$doctor" | grep -Fq "analyze=load-only"
+  printf "%s\n" "$doctor" | grep -E "Full-text search: available|VECTOR extension: available|analyze=load-only"
   python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8; assert c["mcp_servers"]["gitnexus"]["args"] == ["mcp"]'\''
 '
 
-docker run --rm -v "$(dirname "$0")/codex-config-smoke.sh:/tmp/codex-config-smoke.sh:ro" \
+docker volume create "$codex_volume" >/dev/null
+docker run --rm -e CODEX_HOME=/home/multica/.codex \
+  -v "$codex_volume:/home/multica/.codex" \
+  -v "$script_dir/codex-config-smoke.sh:/tmp/codex-config-smoke.sh:ro" \
+  -v "$script_dir/codex-app-server-smoke.py:/tmp/codex-app-server-smoke.py:ro" \
+  --entrypoint bash "$image" /tmp/codex-config-smoke.sh
+docker run --rm -e CODEX_HOME=/home/multica/.codex \
+  -v "$codex_volume:/home/multica/.codex" \
+  -v "$script_dir/codex-config-smoke.sh:/tmp/codex-config-smoke.sh:ro" \
+  -v "$script_dir/codex-app-server-smoke.py:/tmp/codex-app-server-smoke.py:ro" \
   --entrypoint bash "$image" /tmp/codex-config-smoke.sh
 
 docker run --rm --network none -e PYTHONPATH=/opt/hermes \
-  -v "$(dirname "$0")/gitnexus-mcp-smoke.py:/tmp/gitnexus-mcp-smoke.py:ro" \
+  -v "$script_dir/gitnexus-mcp-smoke.py:/tmp/gitnexus-mcp-smoke.py:ro" \
   --entrypoint /opt/hermes/.venv/bin/python "$image" /tmp/gitnexus-mcp-smoke.py
 
 docker run --rm -i --env PYTHONPATH=/opt/hermes --entrypoint /opt/hermes/.venv/bin/python "$image" - \
-  < "$(dirname "$0")/hermes-mcp-smoke.py"
+  < "$script_dir/hermes-mcp-smoke.py"
 
 docker volume create "$hermes_volume" >/dev/null
 docker run --rm -v "$hermes_volume:/home/multica/.hermes" --entrypoint sh "$image" -c '

@@ -1,0 +1,90 @@
+name: GitNexus final-image runtime validation
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+    paths:
+      - Dockerfile
+      - Dockerfile.bootstrap
+      - gitnexus/**
+      - compose.yaml
+      - entrypoint.sh
+      - healthcheck.sh
+      - tests/**
+      - guard-vnext/**
+      - .github/workflows/runtime-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    if: contains(github.event.pull_request.labels.*.name, 'runtime-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            suffix: amd64
+          - platform: linux/arm64
+            suffix: arm64
+    steps:
+      - name: Checkout exact PR merge commit
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU and Buildx
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build bootstrap locally without publishing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile.bootstrap
+          platforms: ${{ matrix.platform }}
+          load: true
+          push: false
+          tags: local/multica-bootstrap:runtime-${{ matrix.suffix }}
+          build-args: |
+            MULTICA_VERSION=v0.13.0
+            HERMES_VERSION=v0.23.4
+            HERMES_COMMIT=8fc0374447313e276f6b9a2764bfc750190c966a
+            HERMES_ARCHIVE_SHA256=620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0
+            GITNEXUS_VERSION=1.6.13-rc.260
+            PYTHON_BUILD_STANDALONE_RELEASE=20261124
+            PYTHON_BUILD_STANDALONE_VERSION=3.14.10+20261124
+          cache-from: type=gha,scope=runtime-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=runtime-${{ matrix.suffix }}
+
+      - name: Build final workspace locally
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: >-
+          docker build --platform "$PLATFORM" --tag "local/multica-workspace:runtime-$SUFFIX"
+          --build-arg "BOOTSTRAP_IMAGE=local/multica-bootstrap:runtime-$SUFFIX" .
+
+      - name: Verify image architecture and report sizes
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          image="local/multica-workspace:runtime-$SUFFIX"
+          docker image inspect "$image" --format 'platform={{.Os}}/{{.Architecture}} image_size_bytes={{.Size}}'
+          test "$(docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')" = "$PLATFORM"
+          compressed_bytes=$(docker save "$image" | gzip -1 | wc -c)
+          echo "compressed_docker_archive_bytes=$compressed_bytes"
+          {
+            echo "### $PLATFORM final workspace"
+            echo "- image: $image"
+            echo "- compressed docker-save archive: $compressed_bytes bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run full Docker lifecycle and offline runtime smoke
+        env:
+          IMAGE: local/multica-workspace:runtime-${{ matrix.suffix }}
+        run: bash tests/container-smoke.sh "$IMAGE"
