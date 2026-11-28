@@ -1,0 +1,13 @@
+{
+  "name": "multica-workspace-gitnexus-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "gitnexus": "1.6.13-rc.260"
+  },
+  "allowScripts": {
+    "@ladybugdb/core@0.22.0": true,
+    "gitnexus@1.6.13-rc.260": true,
+    "@scarf/scarf": false
+  }
+}

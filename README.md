@@ -6,17 +6,17 @@ Multica 编程 Agent 工作站，支持 `linux/amd64` 与 `linux/arm64`。项目
 
 ### 1. GitHub Actions：bootstrap 镜像
 
-`Dockerfile.bootstrap` 仅从 GitHub Release 获取固定版本的 Multica CLI `0.13.0`、Hermes `v0.23.4` 固定源码归档（commit `8fc0374447313e276f6b9a2764bfc750190c966a`，SHA-256 `620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0`），以及固定版本的 CPython `3.14.10` python-build-standalone `install_only` 压缩包。它不包含 Hermes venv、常规 PyPI wheel、Node、浏览器或依赖缓存。发布的新 bootstrap 标签为：
+`Dockerfile.bootstrap` 固定 Multica CLI `0.13.0`、Hermes `v0.23.4` 源码、CPython `3.14.10` install-only 归档，并通过 Node 24 Debian trixie 构建阶段以 npm lockfile 安装 GitNexus `1.6.13-rc.260`。GitNexus 的 Linux amd64/arm64 LadybugDB FTS/VECTOR 扩展和官方 12 项 Skills 随包预置；最终 bootstrap 只接收 GitNexus runtime payload，不带构建 Node/npm 工具链或 npm 缓存。新 bootstrap 标签为：
 
 ```text
-ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
 ```
 
-Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/arm64 `install_only` 压缩包均在 bootstrap 构建时校验 SHA-256。旧标签不覆盖。境外资源只出现在 GitHub Actions bootstrap 构建期间；服务器只拉取 bootstrap 镜像，不访问 GitHub。
+Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/arm64 `install_only` 压缩包均在 bootstrap 构建时校验 SHA-256；GitNexus npm 及传递依赖用提交的 lockfile `integrity` 固定。旧标签不覆盖。境外资源只出现在 GitHub Actions bootstrap 构建期间；服务器只拉取 bootstrap 镜像，不访问 GitHub/npm/Ladybug 扩展源。
 
 ### 2. 服务器：workspace 镜像
 
-`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。Hermes 需要 Python `>=3.14,<3.15`；本方案固定 CPython `3.14.10`，从 bootstrap 中已校验的 `install_only` 压缩包解压，不重复下载或编译 Python。uv `0.13.5` 与 Linux ACP/MCP Python 依赖从 TUNA PyPI 安装，不允许 uv 自动下载 Python。依赖版本与 hashes 由 Hermes `uv.lock` 固定；导出使用 `--frozen`，启用 Hermes 的 `acp` 与 `mcp` extras，并忽略 `psutil` 的 source override 后排除 Android-only Git dependency（commit `380bd2b59c67b0e1b04bbf3a90b11744f4f96644`）。MCP extra 固定 `mcp==2.3.0`、`httpx2==2.15.1` 与 `starlette==1.9.0`。上游 uv 的 3-day `exclude-newer` 在部分镜像缺失上传时间时会把锁定包判为过新，因此仅构建副本禁用该时间过滤；`--frozen` 和安装时 `--require-hashes` 仍约束锁定内容。可选 KittenTTS wheel/misaki Git source 未选择，不进入镜像。
+`Dockerfile` 基于 bootstrap 镜像，在服务器侧安装工作站软件。Hermes 需要 Python `>=3.14,<3.15`；本方案固定 CPython `3.14.10`，从 bootstrap 中已校验的 `install_only` 压缩包解压，不重复下载或编译 Python。uv `0.13.5` 与 Linux ACP/MCP Python 依赖从 TUNA PyPI 安装，不允许 uv 自动下载 Python。依赖版本与 hashes 由 Hermes `uv.lock` 固定；导出使用 `--frozen`，启用 Hermes 的 `acp` 与 `mcp` extras，并忽略 `psutil` 的 source override 后排除 Android-only Git dependency（commit `380bd2b59c67b0e1b04bbf3a90b11744f4f96644`）。MCP extra 固定 `mcp==2.3.0`、`httpx2==2.15.1` 与 `starlette==1.9.0`。GitNexus `GITNEXUS_LBUG_EXTENSION_INSTALL=load-only` 使 analyze 也只加载镜像预置扩展，避免运行时下载。可选 KittenTTS wheel/misaki Git source 未选择，不进入镜像。
 
 服务器侧安装源：
 
@@ -26,17 +26,19 @@ Multica amd64/arm64 release 压缩包、Hermes commit archive、CPython amd64/ar
 - npm registry：TUNA 没有对应 registry，使用 `https://registry.npmmirror.com`
 - PyPI：`https://pypi.tuna.tsinghua.edu.cn/simple`
 
-截至 2026-11-28，官方 npm `latest` dist-tag 指向 pi `1.7.0`（2026-11-28 00:58 CST 更新）与 Codex CLI `0.172.0`（2026-11-28 01:16 CST 更新）；以这些精确版本固定镜像，官方包元数据分别见 [pi npm package](https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest) 与 [Codex npm package](https://registry.npmjs.org/@openai/codex/latest)。Dockerfile 与 Compose 默认值保持一致。最终镜像包含 Hermes `v0.23.4` Python 源码与 ACP/MCP/core 依赖、Multica CLI `0.13.0`、Codex Stop Guard vNext、Node.js 24/npm、pi `1.7.0`、Codex CLI `0.172.0`、Git、GitHub CLI、Docker CLI、系统 Chromium、Chrome DevTools MCP、Python 3.14.10、jq、pnpm、build-essential、tini、curl、wget、openssh-client、vim、ripgrep、fd-find、host/dig/nslookup、ping、ip/ss、nc 与 traceroute。
+截至 2026-11-28，官方 npm `latest` dist-tag 指向 pi `1.7.0` 与 Codex CLI `0.172.0`；Dockerfile 与 Compose 默认值保持一致。最终镜像另含 GitNexus `1.6.13-rc.260`、静态 MCP 服务配置及 `/etc/codex/skills/` 下的 12 项官方 Skills；Codex 系统配置增补 GitNexus MCP，不变更 Guard hook。用户同名配置/技能不会被运行时覆盖。Node.js 仍由最终镜像现有 Node 24 安装层提供。
 
 境外资源清单：Multica `v0.13.0` 官方 release（双架构 tarball，无可用国内官方镜像）、Hermes `v0.23.4` commit 归档（无国内镜像，且 tag→commit 固定需原始 Git 归档）、python-build-standalone `20261124` CPython `3.14.10` install_only 压缩包（国内镜像无法稳定保留固定历史 release，按用户授权放入 bootstrap）。它们仅在 bootstrap 构建时下载并校验；Debian、Node、npm、PyPI 均走国内镜像。
 
 体积验收（amd64）：原完整 Hermes bootstrap 本地为 3,341,197,018 bytes 未压缩；旧 OCI image archive 的压缩 blob 合计 1,197,201,822 bytes。精简源码阶段记录为 250,400,856 bytes 未压缩；加入 Python 后本次 bootstrap 本地为 327,105,201 bytes 未压缩，Python 压缩归档为 76,700,449 bytes。新 OCI image archive 为 171,084,288 bytes（压缩 blob 合计 171,075,155 bytes），对比旧压缩 blob 减少约 85.7%，未压缩 image size 减少约 90.2%。这是可复现的本地 OCI 下载体积，不是 GHCR 远程 manifest 实测；尚未发布。amd64 最终 workspace 镜像为 3,468,255,687 bytes 未压缩，完整 container smoke 通过。为完成本地验证，本机 TUNA PyPI/Debian/Node HTTPS 出现 TLS EOF/证书错误，构建分别临时覆盖为 Aliyun PyPI/Debian 与 npmmirror Node；生产默认仍为 TUNA/npmmirror。arm64 Python 归档为 58,939,713 bytes（压缩文件），镜像构建未验证。
 
+MEM-838 GitNexus amd64 本地验收：bootstrap OCI image 为 685,317,817 bytes，OCI archive 为 230,291,456 bytes；同机可用的前置 bootstrap 基线为 332,421,543 / 173,520,384 bytes，增量分别为 352,896,274 bytes 与 56,771,072 bytes。`/opt/gitnexus` runtime payload 实测约 365 MiB。最终 workspace OCI image 为 3,840,223,279 bytes，OCI archive 为 1,550,436,864 bytes；前置 workspace 基线为 3,470,149,381 / 1,482,997,248 bytes，增量为 370,073,898 bytes 与 67,439,616 bytes。以上为本地 amd64 OCI 实测，非 GHCR 多架构 manifest 体积；包含以 Node `v24.22.3`、Debian trixie 构建，LadybugDB `0.22.0`，doctor 离线报告 FTS/VECTOR available，MCP 在 `--network none` 下实际完成临时仓库的 index-only、query、context、impact。仓库当前运行环境没有 arm64 QEMU，arm64 bootstrap 构建以 `exec format error` 失败；GitHub workflow 的 QEMU 双架构构建和 arm64 workspace 尚未取得证据。Codex 新 `CODEX_HOME` 能继承系统 MCP；同名用户 MCP 配置与 skill 文件保留且不被覆盖。GitNexus 默认 npm 包不含本地 embedding runtime，语义向量需外部 embeddings 配置；keyword/graph 查询已验证。完整 `container-smoke.sh` 在本地 Podman shim 下无法完成 supervisor health 状态断言（Podman 不支持该 Docker HEALTHCHECK），其余新增 GitNexus/Codex 专项测试单独通过。
+
 新配置默认使用新 bootstrap 标签。升级时先备份 `.env`；若现存 `.env` 明确设置了旧 `BOOTSTRAP_IMAGE`（如 `0.8.1`），将其更新为下方新标签，因为显式旧值会覆盖 Compose 默认值。确保新 bootstrap 标签已发布且代理同步完成，再构建并启动：
 
 ```sh
 # 新版 Multica + Hermes
-export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+export BOOTSTRAP_IMAGE=ghcr.nju.edu.cn/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
 docker compose build --pull agent && docker compose up -d agent
 ```
 
@@ -155,4 +157,4 @@ bash tests/container-smoke.sh multica-workspace:local
 ```
 
 `tests/image-contract.sh` 会确保 GitHub Release 下载只存在于 bootstrap Dockerfile，服务器侧 Dockerfile 使用 TUNA/npmmirror，并保留 UID 1000、sudo、healthcheck 与 supervisor 运行契约。
-`tests/container-smoke.sh` 还会通过 Hermes venv 的 MCP SDK 发现本地 `add` 工具并调用，确认 MCP client 能实际完成本地协议往返。
+`tests/container-smoke.sh` 还会在隔离网络中校验 GitNexus doctor 的 FTS/VECTOR 与 load-only 策略、以全新 `CODEX_HOME` 确认系统 MCP 注册可继承、通过 MCP SDK 对临时索引执行 query/context/impact，并通过 Hermes MCP SDK 验证本地 `add` 工具。

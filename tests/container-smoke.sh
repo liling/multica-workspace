@@ -41,8 +41,17 @@ docker run --rm --entrypoint sh "$image" -lc '
   test -r /etc/codex/config.toml
   test -r /etc/codex/hooks/guard-vnext/observe_stop.py
   test -r /etc/codex/hooks/guard-vnext/guard_vnext.py
-  python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8'\''
+  test -r /etc/codex/skills/gitnexus-cli/SKILL.md
+  gitnexus doctor | grep -q "analyze=load-only"
+  python3 -c '\''import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); assert c["hooks"]["Stop"][0]["hooks"][0]["timeout"] == 8; assert c["mcp_servers"]["gitnexus"]["args"] == ["mcp"]'\''
 '
+
+docker run --rm -v "$(dirname "$0")/codex-config-smoke.sh:/tmp/codex-config-smoke.sh:ro" \
+  --entrypoint bash "$image" /tmp/codex-config-smoke.sh
+
+docker run --rm --network none -e PYTHONPATH=/opt/hermes \
+  -v "$(dirname "$0")/gitnexus-mcp-smoke.py:/tmp/gitnexus-mcp-smoke.py:ro" \
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /tmp/gitnexus-mcp-smoke.py
 
 docker run --rm -i --env PYTHONPATH=/opt/hermes --entrypoint /opt/hermes/.venv/bin/python "$image" - \
   < "$(dirname "$0")/hermes-mcp-smoke.py"
@@ -74,4 +83,4 @@ done
 docker stop --time 10 "$name" >/dev/null
 [[ "$(docker inspect -f '{{.State.Status}}' "$name")" == exited ]]
 [[ "$(docker inspect -f '{{.State.ExitCode}}' "$name")" == 0 ]]
-echo 'container smoke tests passed: identity, tools, Stop Guard, network diagnostics, sudo, missing-auth health, stop'
+echo 'container smoke tests passed: identity, tools, GitNexus doctor/MCP, system config, skills, Stop Guard, network diagnostics, sudo, missing-auth health, stop'

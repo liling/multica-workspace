@@ -5,7 +5,7 @@
 # this file must be buildable from China-friendly mirrors so the server does
 # not need direct access to github.com.
 
-ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4
+ARG BOOTSTRAP_IMAGE=ghcr.io/liling/multica-workspace-bootstrap:0.13.0-hermes-0.23.4-gitnexus-1.6.13-rc.260
 ARG PYTHON_VERSION=3.14.10
 ARG PYPI_MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple
 ARG HERMES_VERSION=0.23.4
@@ -161,7 +161,7 @@ COPY --chmod=0644 guard-vnext/codex-system.toml /etc/codex/config.toml
 RUN set -eux; \
     PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/etc/codex/hooks/guard-vnext \
       python3 -c 'import guard_vnext, observe_stop; assert guard_vnext.MAX_BLOCKS == 3'; \
-    python3 -c 'import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); h=c["hooks"]["Stop"][0]["hooks"][0]; assert h["command"] == "python3 /etc/codex/hooks/guard-vnext/observe_stop.py" and h["timeout"] == 8'; \
+    python3 -c 'import pathlib,tomllib; c=tomllib.loads(pathlib.Path("/etc/codex/config.toml").read_text()); h=c["hooks"]["Stop"][0]["hooks"][0]; m=c["mcp_servers"]["gitnexus"]; assert h["command"] == "python3 /etc/codex/hooks/guard-vnext/observe_stop.py" and h["timeout"] == 8; assert m["command"] == "/usr/local/bin/gitnexus" and m["args"] == ["mcp"]'; \
     test "$(stat -c %a:%u:%g /etc/codex/config.toml)" = 644:0:0; \
     test "$(stat -c %a:%u:%g /etc/codex/hooks/guard-vnext/guard_vnext.py)" = 644:0:0
 
@@ -178,16 +178,18 @@ RUN groupadd --gid 1000 multica \
 # every other tool above comes from TUNA/npmmirror-backed server-side installation.
 RUN set -eux; \
     su -s /bin/bash multica -c 'set -euo pipefail; id -u; id -g; test "$HOME" = /home/multica; \
-      pi --version; codex --version; multica version; hermes --version; hermes acp --check; gh --version; docker --version; \
+      pi --version; codex --version; multica version; gitnexus --version; hermes --version; hermes acp --check; gh --version; docker --version; \
       chromium --version; chrome-devtools-mcp --version; python3 --version; jq --version; pnpm --version; \
       fc-match "Noto Sans CJK SC" | grep -qi "NotoSansCJK"; \
       command -v host; command -v dig; command -v nslookup; command -v ping; command -v wget; \
       command -v ip; command -v ss; command -v nc; command -v traceroute; \
       sudo -n id -u | grep -qx 0; \
-      test -r /etc/codex/config.toml; test -r /etc/codex/hooks/guard-vnext/observe_stop.py; \
+      test -r /etc/codex/config.toml; test -r /etc/codex/hooks/guard-vnext/observe_stop.py; test -r /etc/codex/skills/gitnexus-cli/SKILL.md; \
       test "$(id -u)" = 1000'; \
     test "$(stat -c %a:%u:%g /home/multica/.ssh)" = 700:1000:1000; \
     test "$(stat -c %a:%u:%g /run/multica-workspace)" = 755:1000:1000
+
+ENV GITNEXUS_LBUG_EXTENSION_INSTALL=load-only
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh

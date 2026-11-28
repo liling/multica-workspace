@@ -5,6 +5,7 @@ name: Build Multica Bootstrap Image
     paths:
       - Dockerfile
       - Dockerfile.bootstrap
+      - gitnexus/**
       - compose.yaml
       - entrypoint.sh
       - healthcheck.sh
@@ -24,6 +25,7 @@ permissions:
 env:
   MULTICA_VERSION: 0.13.0
   HERMES_VERSION: 0.23.4
+  GITNEXUS_VERSION: 1.6.13-rc.260
 
 jobs:
   validate:
@@ -64,12 +66,13 @@ jobs:
           file: ./Dockerfile.bootstrap
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}
+          tags: ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}-gitnexus-${{ env.GITNEXUS_VERSION }}
           build-args: |
             MULTICA_VERSION=v${{ env.MULTICA_VERSION }}
             HERMES_VERSION=v${{ env.HERMES_VERSION }}
             HERMES_COMMIT=8fc0374447313e276f6b9a2764bfc750190c966a
             HERMES_ARCHIVE_SHA256=620bf64a63c7fabd995df402e46d5eee0cdab7e5d01a4aeddc3a6fa5dee54cc0
+            GITNEXUS_VERSION=${{ env.GITNEXUS_VERSION }}
             PYTHON_BUILD_STANDALONE_RELEASE=20261124
             PYTHON_BUILD_STANDALONE_VERSION=3.14.10+20261124
           cache-from: type=gha
@@ -79,4 +82,4 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}
+            ghcr.io/${{ github.repository_owner }}/multica-workspace-bootstrap:${{ env.MULTICA_VERSION }}-hermes-${{ env.HERMES_VERSION }}-gitnexus-${{ env.GITNEXUS_VERSION }}
