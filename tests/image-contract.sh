@@ -102,7 +102,7 @@ grep -Fq 'install -d -o 1000 -g 1000 -m 0700 /home/multica/.ssh' "$dockerfile"
 grep -Fq 'install -d -o 1000 -g 1000 -m 0755 /run/multica-workspace' "$dockerfile"
 grep -Fq "multica ALL=(ALL) NOPASSWD: ALL" "$dockerfile"
 ! grep -Eq '/root/|chmod[[:space:]]+666.*docker.sock|docker.sock.*chmod[[:space:]]+666' "$dockerfile"
-grep -Fq 'sudo -n id -u | grep -qx 0' "$dockerfile"
+grep -Fq 'test "$(sudo -n id -u)" = 0' "$root/tests/container-smoke.sh"
 grep -Fq 'chromium --version' "$dockerfile"
 # Guard is included without a GitHub fetch in the server-side build.
 grep -Fq 'COPY --chmod=0644 guard-vnext/*.py /etc/codex/hooks/guard-vnext/' "$dockerfile"
